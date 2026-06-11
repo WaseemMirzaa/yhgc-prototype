@@ -1,10 +1,89 @@
+import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:crypto/crypto.dart';
 import 'package:yhgc_mobile_app/src/config/app_settings.dart';
 
 /// Matches admin seed / AuthController demo login code when Firestore is not used.
 const kFallbackDemoLoginCode = 'YHG-2026-1001';
+
+// --- Client password hashing (salted PBKDF2-HMAC-SHA256) ---------------------
+// Passwords are never stored in plaintext. Firestore is world-readable in the
+// prototype, so a slow salted hash keeps credentials safe even if the document
+// is read. Verification is self-contained to the mobile app.
+const int _kPasswordIterations = 64000;
+const String _kPasswordAlgo = 'pbkdf2-sha256';
+
+String _bytesToHex(List<int> bytes) =>
+    bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+
+List<int> _hexToBytes(String hex) {
+  final out = <int>[];
+  for (var i = 0; i + 1 < hex.length; i += 2) {
+    out.add(int.parse(hex.substring(i, i + 2), radix: 16));
+  }
+  return out;
+}
+
+List<int> _pbkdf2Sha256(String password, List<int> salt, int iterations) {
+  final hmac = Hmac(sha256, utf8.encode(password));
+  // Single output block is enough: dkLen (32) == hLen for SHA-256.
+  var u = hmac.convert(<int>[...salt, 0, 0, 0, 1]).bytes;
+  final t = Uint8List.fromList(u);
+  for (var i = 1; i < iterations; i++) {
+    u = hmac.convert(u).bytes;
+    for (var j = 0; j < t.length; j++) {
+      t[j] ^= u[j];
+    }
+  }
+  return t;
+}
+
+List<int> _randomSalt([int len = 16]) {
+  final rnd = Random.secure();
+  return List<int>.generate(len, (_) => rnd.nextInt(256));
+}
+
+/// Firestore fields that persist a salted hash for a password. Pure (safe in set/merge/create).
+Map<String, dynamic> hashedPasswordFields(String password) {
+  final salt = _randomSalt();
+  final hash = _pbkdf2Sha256(password, salt, _kPasswordIterations);
+  return {
+    'appPasswordHash': _bytesToHex(hash),
+    'appPasswordSalt': _bytesToHex(salt),
+    'appPasswordIter': _kPasswordIterations,
+    'appPasswordAlgo': _kPasswordAlgo,
+  };
+}
+
+bool _constantTimeEquals(String a, String b) {
+  if (a.length != b.length) return false;
+  var diff = 0;
+  for (var i = 0; i < a.length; i++) {
+    diff |= a.codeUnitAt(i) ^ b.codeUnitAt(i);
+  }
+  return diff == 0;
+}
+
+bool _verifyClientPasswordData(Map<String, dynamic> data, String password) {
+  final storedHash = (data['appPasswordHash'] ?? '').toString();
+  if (storedHash.isNotEmpty) {
+    final salt = _hexToBytes((data['appPasswordSalt'] ?? '').toString());
+    final iter = (data['appPasswordIter'] as num?)?.toInt() ?? _kPasswordIterations;
+    final computed = _bytesToHex(_pbkdf2Sha256(password, salt, iter));
+    return _constantTimeEquals(computed, storedHash);
+  }
+  // Legacy fallback: accounts created before hashing still log in until their next change.
+  final legacy = (data['appPassword'] ?? '').toString();
+  return legacy.isNotEmpty && legacy == password;
+}
+
+bool _hasPasswordSet(Map<dynamic, dynamic> data) {
+  if ((data['appPasswordHash'] ?? '').toString().trim().isNotEmpty) return true;
+  return (data['appPassword'] ?? '').toString().trim().isNotEmpty;
+}
 
 class ClientLoginAccess {
   const ClientLoginAccess({
@@ -67,7 +146,7 @@ Future<ClientLoginAccess> _checkClientFromFirestore(String code) async {
             'This account has been revoked. Contact your adviser.',
           );
         }
-        final hasPassword = (raw['appPassword'] ?? '').toString().trim().isNotEmpty;
+        final hasPassword = _hasPasswordSet(raw);
         return ClientLoginAccess.ok(clientId: d.id, hasPassword: hasPassword);
       }
       return ClientLoginAccess.denied('Unknown login code.');
@@ -104,7 +183,7 @@ Future<ClientLoginAccess> _checkClientFromFirestore(String code) async {
       if (id.isEmpty) {
         return ClientLoginAccess.denied('Client record is incomplete. Contact your adviser.');
       }
-      final hasPassword = (raw['appPassword'] ?? '').toString().trim().isNotEmpty;
+      final hasPassword = _hasPasswordSet(raw);
       return ClientLoginAccess.ok(clientId: id, hasPassword: hasPassword);
     }
     return ClientLoginAccess.denied('Unknown login code.');
@@ -125,8 +204,7 @@ Future<bool> verifyClientPassword({
       .get(const GetOptions(source: Source.server));
   if (!snap.exists) return false;
   final data = snap.data() ?? <String, dynamic>{};
-  final stored = (data['appPassword'] ?? '').toString();
-  return stored.isNotEmpty && stored == password;
+  return _verifyClientPasswordData(data, password);
 }
 
 Future<void> setClientPassword({
@@ -134,7 +212,8 @@ Future<void> setClientPassword({
   required String password,
 }) async {
   await FirebaseFirestore.instance.collection('clients').doc(clientId).set({
-    'appPassword': password,
+    ...hashedPasswordFields(password),
+    'appPassword': FieldValue.delete(), // scrub any legacy plaintext
     'passwordUpdatedAt': FieldValue.serverTimestamp(),
   }, SetOptions(merge: true));
 }
@@ -232,7 +311,7 @@ Future<ClientSignupResult> createClientFromMobileSignup({
     'loginCode': loginCode,
     'status': 'active',
     'createdAt': FieldValue.serverTimestamp(),
-    'appPassword': password,
+    ...hashedPasswordFields(password),
     'passwordUpdatedAt': FieldValue.serverTimestamp(),
     'termsAcceptedAt': FieldValue.serverTimestamp(),
     'privacyAcceptedAt': FieldValue.serverTimestamp(),
@@ -260,6 +339,10 @@ Future<String?> deleteClientAccountRecord(String clientId) async {
         await clientRef.set({
           'status': 'revoked',
           'appPassword': FieldValue.delete(),
+          'appPasswordHash': FieldValue.delete(),
+          'appPasswordSalt': FieldValue.delete(),
+          'appPasswordIter': FieldValue.delete(),
+          'appPasswordAlgo': FieldValue.delete(),
           'accountDeletedAt': FieldValue.serverTimestamp(),
           'accountDeletedFrom': 'mobile_app',
         }, SetOptions(merge: true));

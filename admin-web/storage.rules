@@ -1,9 +1,18 @@
 rules_version = '2';
-// Prototype: open access (matches Firestore rules on yhgc-77841).
+// Prototype rules (no Firebase Auth yet). The client app reads attachments via tokenized download
+// URLs, so reads stay open. Writes are confined to the admin upload area and capped in size, instead
+// of allowing arbitrary-path uploads anywhere in the bucket.
 service firebase.storage {
   match /b/{bucket}/o {
+    // Admin uploads only ever land under adminPrototype/**. Cap object size at 50 MB.
+    match /adminPrototype/{allPaths=**} {
+      allow read: if true;
+      allow write: if request.resource == null || request.resource.size < 50 * 1024 * 1024;
+    }
+    // Read-only elsewhere (legacy/tokenized links); no writes outside the admin area.
     match /{allPaths=**} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if false;
     }
   }
 }

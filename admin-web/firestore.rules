@@ -1,10 +1,43 @@
 rules_version = '2';
-// Prototype: open access (matches yhgc-testing behaviour for admin + mobile client SDK).
-// Tighten before production (Firebase Auth + role checks).
+// Prototype rules. There is no Firebase Auth yet, so the portfolio collections that BOTH the admin
+// and the client app read/write are still open. Everything that is only touched by Cloud Functions
+// (Admin SDK, which bypasses rules) or only written one-way is now locked down, and unknown paths are
+// denied by default. Full per-client lockdown lands with real auth (Phase 4-full).
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if true;
+
+    // --- Portfolio data: read by the client app, written by the admin (both unauthenticated). ---
+    match /clients/{id} { allow read, write: if true; }
+    match /companies/{id} { allow read, write: if true; }
+    match /properties/{id} { allow read, write: if true; }
+    match /constructionProjects/{id} { allow read, write: if true; }
+    match /constructionStages/{id} { allow read, write: if true; }
+    match /financeRecords/{id} { allow read, write: if true; }
+    match /incomeRows/{id} { allow read, write: if true; }
+    match /invoices/{id} { allow read, write: if true; }
+    match /insuranceRecords/{id} { allow read, write: if true; }
+    match /assets/{id} { allow read, write: if true; }
+    match /notifications/{id} { allow read, write: if true; }
+    match /accountantLinks/{id} { allow read, write: if true; }
+
+    // Legacy single-doc snapshot (migration backup + accountant link writes) and mobile app config.
+    match /appSnapshots/{id} { allow read, write: if true; }
+    match /appConfig/{id} { allow read, write: if true; }
+
+    // Device push tokens: a device registers/removes its own token; Cloud Functions read via Admin SDK.
+    match /users/{uid}/fcmTokens/{tokenId} { allow read, write: if true; }
+
+    // Push outbox: the admin enqueues notifications; only Cloud Functions read/process them.
+    match /fcmOutbox/{id} {
+      allow create: if true;
+      allow read, update, delete: if false;
     }
+
+    // Server-only bookkeeping (Cloud Functions / Admin SDK only).
+    match /config/{document=**} { allow read, write: if false; }
+    match /insuranceAlertDedupe/{id} { allow read, write: if false; }
+
+    // Anything not listed above is denied.
+    match /{document=**} { allow read, write: if false; }
   }
 }
