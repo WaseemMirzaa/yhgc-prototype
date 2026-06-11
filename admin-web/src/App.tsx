@@ -6,6 +6,7 @@ import { getDownloadURL, getStorage, ref, uploadBytes } from "firebase/storage"
 import { LegalPublicPage } from "./components/LegalPublicPage"
 import { MobileAppSettingsPanel } from "./components/MobileAppSettingsPanel"
 import { activeBackendMode, adminPortalUser, appSettings } from "./config/settings"
+import { useI18n } from "./i18n/context"
 import { useAppStore } from "./store/useAppStore"
 import type {
   AppSnapshot,
@@ -229,9 +230,9 @@ const INVOICE_STATUS_OPTIONS: { value: InvoiceStatus; label: string }[] = [
 function formatGbpAmount(n: number | undefined): string {
   if (n == null || !Number.isFinite(n)) return "—"
   try {
-    return new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP", maximumFractionDigits: 2 }).format(n)
+    return new Intl.NumberFormat("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(n)
   } catch {
-    return `£${n}`
+    return `${n} €`
   }
 }
 
@@ -1098,6 +1099,8 @@ function AdminApp() {
     updateConstructionStage,
   } = useAppStore()
 
+  const { t, lang, setLang } = useI18n()
+
   useEffect(() => {
     void init()
   }, [init])
@@ -1323,7 +1326,7 @@ function AdminApp() {
       (item) => item.email.toLowerCase() === email && acceptedPasswords.has(password),
     )
     if (!user) {
-      setAuthError("Invalid credentials.")
+      setAuthError(t("login.invalidCredentials"))
       return
     }
     localStorage.setItem(AUTH_SESSION_KEY, user.email)
@@ -1344,15 +1347,15 @@ function AdminApp() {
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(201,169,110,0.22),transparent_50%)]" />
             <div className="relative">
               <img src={BRAND_LOGO_SRC} alt="" className="h-14 w-auto max-w-[280px] object-contain object-left" />
-              <p className="mt-4 text-xs uppercase tracking-[0.24em] text-yhgc-gold">Admin portal</p>
-              <h1 className="mt-4 text-4xl font-semibold leading-tight">Private Operations Portal</h1>
+              <p className="mt-4 text-xs uppercase tracking-[0.24em] text-yhgc-gold">{t("login.adminPortal")}</p>
+              <h1 className="mt-4 text-4xl font-semibold leading-tight">{t("login.privateOps")}</h1>
               <p className="mt-4 max-w-md text-sm text-neutral-300">
-                Professional control center for portfolio operations, client onboarding, and secure data workflows.
+                {t("login.heroDesc")}
               </p>
               <div className="mt-8 space-y-3">
-                <div className="rounded-xl border border-yhgc-gold/25 bg-black/35 p-3 text-sm text-neutral-200">Secure invitation-only access</div>
-                <div className="rounded-xl border border-yhgc-gold/25 bg-black/35 p-3 text-sm text-neutral-200">Unified portfolio controls</div>
-                <div className="rounded-xl border border-yhgc-gold/25 bg-black/35 p-3 text-sm text-neutral-200">Professional data and upload workflows</div>
+                <div className="rounded-xl border border-yhgc-gold/25 bg-black/35 p-3 text-sm text-neutral-200">{t("login.secureAccess")}</div>
+                <div className="rounded-xl border border-yhgc-gold/25 bg-black/35 p-3 text-sm text-neutral-200">{t("login.unifiedControls")}</div>
+                <div className="rounded-xl border border-yhgc-gold/25 bg-black/35 p-3 text-sm text-neutral-200">{t("login.dataWorkflows")}</div>
         </div>
             </div>
           </div>
@@ -1362,16 +1365,16 @@ function AdminApp() {
               <div className="space-y-5">
                 <div>
                   <img src={BRAND_LOGO_SRC} alt="YOUR HOME GROUP Consultancy" className="h-16 w-auto max-w-full object-contain object-left" />
-                  <p className="mt-4 text-xs uppercase tracking-[0.2em] text-yhgc-gold">Admin portal</p>
-                  <h2 className="mt-2 text-3xl font-semibold text-yhgc-black">Welcome</h2>
-                  <p className="mt-2 text-sm text-neutral-600">Single administrator sign-in.</p>
+                  <p className="mt-4 text-xs uppercase tracking-[0.2em] text-yhgc-gold">{t("login.adminPortal")}</p>
+                  <h2 className="mt-2 text-3xl font-semibold text-yhgc-black">{t("login.welcome")}</h2>
+                  <p className="mt-2 text-sm text-neutral-600">{t("login.singleSignin")}</p>
                 </div>
                 <button
                   type="button"
                   onClick={() => setAuthView("login")}
                   className="w-full rounded-xl bg-yhgc-crimson px-4 py-3 text-sm font-medium text-white shadow hover:opacity-95"
                 >
-                  Login
+                  {t("login.submit")}
                 </button>
               </div>
             )}
@@ -1379,10 +1382,10 @@ function AdminApp() {
             {authView === "login" && (
               <div className="space-y-4">
                 <img src={BRAND_LOGO_SRC} alt="YOUR HOME GROUP Consultancy" className="h-14 w-auto max-w-full object-contain object-left" />
-                <h2 className="text-2xl font-semibold text-yhgc-black">Administrator login</h2>
+                <h2 className="text-2xl font-semibold text-yhgc-black">{t("login.administratorLogin")}</h2>
                 <form onSubmit={handleLoginDirect} className="rounded-2xl border border-yhgc-gold/20 bg-white p-4 shadow-sm">
                   <label className="text-sm">
-                    <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-neutral-500">Email</span>
+                    <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-neutral-500">{t("login.email")}</span>
                     <input
                       type="email"
                       value={loginEmail}
@@ -1391,7 +1394,7 @@ function AdminApp() {
                     />
                   </label>
                   <label className="mt-3 block text-sm">
-                    <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-neutral-500">Password</span>
+                    <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-neutral-500">{t("login.password")}</span>
                     <input
                       type="password"
                       value={loginPassword}
@@ -1400,7 +1403,7 @@ function AdminApp() {
                     />
                   </label>
                   <button type="submit" className="mt-3 block w-full rounded-xl bg-yhgc-crimson px-4 py-2.5 text-sm font-medium text-white shadow hover:opacity-95">
-                    Login
+                    {t("login.submit")}
                   </button>
                 </form>
               </div>
@@ -1431,7 +1434,7 @@ function AdminApp() {
         >
           <div className="flex items-center gap-3 rounded-2xl border border-yhgc-gold/40 bg-white px-6 py-4 shadow-xl">
             <span className="h-6 w-6 shrink-0 rounded-full border-2 border-yhgc-crimson border-t-transparent animate-spin" />
-            <p className="text-sm font-medium text-neutral-800">Saving changes…</p>
+            <p className="text-sm font-medium text-neutral-800">{t("shell.savingChanges")}</p>
           </div>
         </div>
       ) : null}
@@ -1458,8 +1461,8 @@ function AdminApp() {
         <aside className="col-span-12 border-r border-yhgc-gold/20 bg-gradient-to-b from-[#0a0a0a] via-[#111111] to-[#171717] px-4 py-6 text-white lg:col-span-3 xl:col-span-2">
           <div className="mb-6 rounded-lg border border-yhgc-gold/25 bg-neutral-900/70 p-3">
             <img src={BRAND_LOGO_SRC} alt="" className="h-10 w-auto max-w-full object-contain object-left opacity-95" />
-            <p className="mt-2 text-xs uppercase tracking-[0.2em] text-yhgc-gold">Admin</p>
-            <h1 className="mt-1 text-lg font-semibold leading-tight">Operations</h1>
+            <p className="mt-2 text-xs uppercase tracking-[0.2em] text-yhgc-gold">{t("shell.admin")}</p>
+            <h1 className="mt-1 text-lg font-semibold leading-tight">{t("shell.operations")}</h1>
           </div>
           <nav className="space-y-2">
             {sections.map((item) => (
@@ -1475,14 +1478,29 @@ function AdminApp() {
                   setAddAccountantLinkOpen(false)
                   setSection(item)
                 }}
-                className={`w-full rounded-lg px-3 py-2 text-left text-sm capitalize transition ${
+                className={`w-full rounded-lg px-3 py-2 text-left text-sm transition ${
                   section === item ? "bg-yhgc-crimson text-white shadow" : "text-neutral-200 hover:bg-neutral-800/80"
                 }`}
               >
-                {item.replaceAll("_", " ")}
+                {t(`nav.${item}`)}
               </button>
             ))}
           </nav>
+          <div className="mt-4 flex items-center gap-1 rounded-lg border border-yhgc-gold/25 bg-neutral-900/70 p-1 text-xs">
+            <span className="px-2 text-neutral-400">{t("common.language")}</span>
+            {(["fr", "en"] as const).map((code) => (
+              <button
+                key={code}
+                type="button"
+                onClick={() => setLang(code)}
+                className={`flex-1 rounded-md px-2 py-1 font-medium uppercase transition ${
+                  lang === code ? "bg-yhgc-gold text-black" : "text-neutral-300 hover:bg-neutral-800"
+                }`}
+              >
+                {code}
+              </button>
+            ))}
+          </div>
           <button
             type="button"
             onClick={() => {
@@ -1494,7 +1512,7 @@ function AdminApp() {
             }}
             className="mt-6 w-full rounded-md border border-neutral-500 px-3 py-2 text-sm text-neutral-200"
           >
-            Logout
+            {t("shell.logout")}
         </button>
         </aside>
 
@@ -2097,21 +2115,21 @@ function AdminApp() {
 
           {!inDetailView && section === "dashboard" && (
             <section>
-              <h2 className="text-2xl font-semibold">Portfolio Control Center</h2>
+              <h2 className="text-2xl font-semibold">{t("dashboard.title")}</h2>
               <p className="mt-1 text-sm text-neutral-600">
-                Full flow admin for clients, companies, properties, uploads, notifications, and accountant links.
+                {t("dashboard.subtitle")}
               </p>
               <div className="mt-6 grid gap-4 md:grid-cols-5">
-                <StatCard label="Clients" value={stats.clients} />
-                <StatCard label="Companies" value={stats.companies} />
-                <StatCard label="Properties" value={stats.properties} />
-                <StatCard label="Invoices" value={stats.invoices} />
-                <StatCard label="Notifications" value={stats.notifications} />
+                <StatCard label={t("stat.clients")} value={stats.clients} />
+                <StatCard label={t("stat.companies")} value={stats.companies} />
+                <StatCard label={t("stat.properties")} value={stats.properties} />
+                <StatCard label={t("stat.invoices")} value={stats.invoices} />
+                <StatCard label={t("stat.notifications")} value={stats.notifications} />
               </div>
               <div className="mt-4 grid gap-4 md:grid-cols-3">
                 <ActionCard
-                  title="Onboard Client"
-                  desc="Create client, generate code, and start setup."
+                  title={t("dashboard.onboardClient")}
+                  desc={t("dashboard.onboardClientDesc")}
                   onClick={() => {
                     setDetailClientId(null)
                     setDetailCompanyId(null)
@@ -2120,8 +2138,8 @@ function AdminApp() {
                   }}
                 />
                 <ActionCard
-                  title="Update Property"
-                  desc="Open a property to edit its profile and portfolio records."
+                  title={t("dashboard.updateProperty")}
+                  desc={t("dashboard.updatePropertyDesc")}
                   onClick={() => {
                     setDetailClientId(null)
                     setDetailCompanyId(null)
@@ -2130,8 +2148,8 @@ function AdminApp() {
                   }}
                 />
                 <ActionCard
-                  title="Manage Alerts"
-                  desc="Review notifications and accountant links."
+                  title={t("dashboard.manageAlerts")}
+                  desc={t("dashboard.manageAlertsDesc")}
                   onClick={() => {
                     setDetailClientId(null)
                     setDetailCompanyId(null)
@@ -2855,6 +2873,7 @@ function AdminApp() {
 }
 
 function AppLoadingScreen() {
+  const { t } = useI18n()
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-[#f6f4ef] via-[#eef1f5] to-[#e8edf3] p-6">
       <div className="w-full max-w-lg rounded-2xl border border-yhgc-gold/35 bg-white/95 p-8 shadow-xl">
@@ -2863,11 +2882,11 @@ function AppLoadingScreen() {
             <span className="h-5 w-5 rounded-full border-2 border-yhgc-crimson border-t-transparent animate-spin" />
           </span>
           <div>
-            <p className="text-xs uppercase tracking-[0.22em] text-yhgc-gold">YHGC Admin</p>
-            <h2 className="text-lg font-semibold text-neutral-900">Loading your dashboard</h2>
+            <p className="text-xs uppercase tracking-[0.22em] text-yhgc-gold">{t("boot.adminTitle")}</p>
+            <h2 className="text-lg font-semibold text-neutral-900">{t("boot.loadingDashboard")}</h2>
           </div>
         </div>
-        <p className="mb-5 text-sm text-neutral-600">Preparing clients, properties, invoices and alerts...</p>
+        <p className="mb-5 text-sm text-neutral-600">{t("boot.preparing")}</p>
         <div className="space-y-2">
           <div className="h-3 animate-pulse rounded bg-neutral-200" />
           <div className="h-3 w-11/12 animate-pulse rounded bg-neutral-200 [animation-delay:120ms]" />
@@ -2879,14 +2898,14 @@ function AppLoadingScreen() {
 }
 
 function AppBootstrapError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  const { t } = useI18n()
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-[#f6f4ef] via-[#eef1f5] to-[#e8edf3] p-6">
       <div className="w-full max-w-lg rounded-2xl border border-red-200 bg-white p-8 shadow-xl">
-        <p className="text-xs uppercase tracking-[0.22em] text-red-700">YHGC Admin</p>
-        <h2 className="mt-2 text-lg font-semibold text-neutral-900">We could not load your workspace</h2>
+        <p className="text-xs uppercase tracking-[0.22em] text-red-700">{t("boot.adminTitle")}</p>
+        <h2 className="mt-2 text-lg font-semibold text-neutral-900">{t("boot.couldNotLoad")}</h2>
         <p className="mt-3 text-sm text-neutral-600">
-          Check your internet connection and Firebase settings in <code className="rounded bg-neutral-100 px-1">settings.ts</code>, then try
-          again.
+          {t("boot.checkConnection")}
         </p>
         <p className="mt-3 rounded-lg border border-red-100 bg-red-50/80 p-3 text-sm text-red-900">{message}</p>
         <button
@@ -2894,7 +2913,7 @@ function AppBootstrapError({ message, onRetry }: { message: string; onRetry: () 
           onClick={onRetry}
           className="mt-6 w-full rounded-xl bg-yhgc-crimson px-4 py-3 text-sm font-medium text-white shadow hover:opacity-95"
         >
-          Retry
+          {t("common.retry")}
         </button>
       </div>
     </div>
