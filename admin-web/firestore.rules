@@ -1,0 +1,10 @@
+rules_version = '2';
+// Prototype: open access (matches yhgc-testing behaviour for admin + mobile client SDK).
+// Tighten before production (Firebase Auth + role checks).
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}

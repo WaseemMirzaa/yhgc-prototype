@@ -1,0 +1,9 @@
+rules_version = '2';
+// Prototype: open access (matches Firestore rules on yhgc-77841).
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if true;
+    }
+  }
+}

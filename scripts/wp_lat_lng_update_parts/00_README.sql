@@ -1,0 +1,3 @@
+-- Campus _lat/_lng full regen — run files in numeric order (max 100 lines each).
+-- Campuses with coords: 431 | Table prefix: wp_
+-- 01_backup → 02_preview_* → 03_start_transaction → 04_update_lat_* → 05_update_lng_* → 99_commit

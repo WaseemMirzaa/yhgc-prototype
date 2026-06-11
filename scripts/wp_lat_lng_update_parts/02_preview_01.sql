@@ -1,0 +1,99 @@
+-- PREVIEW 1
+SELECT p.ID AS post_id, p.post_title,
+  MAX(CASE WHEN pm.meta_key = '_lat' THEN pm.meta_value END) AS current_lat,
+  MAX(CASE WHEN pm.meta_key = '_lng' THEN pm.meta_value END) AS current_lng,
+  src.new_lat, src.new_lng
+FROM wp_posts p
+LEFT JOIN wp_postmeta pm ON p.ID = pm.post_id AND pm.meta_key IN ('_lat','_lng')
+INNER JOIN (
+  SELECT 4710 AS post_id, '47.6106060' AS new_lat, '-122.3171700' AS new_lng
+  UNION ALL SELECT 4711 AS post_id, '46.7138400' AS new_lat, '-117.0198500' AS new_lng
+  UNION ALL SELECT 4712 AS post_id, '45.5119240' AS new_lat, '-122.6842320' AS new_lng
+  UNION ALL SELECT 4714 AS post_id, '43.6024860' AS new_lat, '-116.1966490' AS new_lng
+  UNION ALL SELECT 4715 AS post_id, '40.8745120' AS new_lat, '-124.0791860' AS new_lng
+  UNION ALL SELECT 4716 AS post_id, '39.7302018' AS new_lat, '-121.8433440' AS new_lng
+  UNION ALL SELECT 4718 AS post_id, '38.5635158' AS new_lat, '-121.4237770' AS new_lng
+  UNION ALL SELECT 4719 AS post_id, '38.5355310' AS new_lat, '-121.7461220' AS new_lng
+  UNION ALL SELECT 4720 AS post_id, '38.3410528' AS new_lat, '-122.6755170' AS new_lng
+  UNION ALL SELECT 4721 AS post_id, '37.8692830' AS new_lat, '-122.2591200' AS new_lng
+  UNION ALL SELECT 4722 AS post_id, '37.7793278' AS new_lat, '-122.4193590' AS new_lng
+  UNION ALL SELECT 4723 AS post_id, '37.6561458' AS new_lat, '-122.0562020' AS new_lng
+  UNION ALL SELECT 4724 AS post_id, '37.5251418' AS new_lat, '-120.8560350' AS new_lng
+  UNION ALL SELECT 4725 AS post_id, '37.3361570' AS new_lat, '-121.8906080' AS new_lng
+  UNION ALL SELECT 4726 AS post_id, '37.3622630' AS new_lat, '-120.4272710' AS new_lng
+  UNION ALL SELECT 4727 AS post_id, '36.9733998' AS new_lat, '-122.0271660' AS new_lng
+  UNION ALL SELECT 4728 AS post_id, '36.8136538' AS new_lat, '-119.7461490' AS new_lng
+  UNION ALL SELECT 4729 AS post_id, '35.3495510' AS new_lat, '-119.1068220' AS new_lng
+  UNION ALL SELECT 4730 AS post_id, '34.4125960' AS new_lat, '-119.8506420' AS new_lng
+  UNION ALL SELECT 4731 AS post_id, '38.7886900' AS new_lat, '-121.2720590' AS new_lng
+  UNION ALL SELECT 4732 AS post_id, '34.2360660' AS new_lat, '-118.5280670' AS new_lng
+  UNION ALL SELECT 4733 AS post_id, '34.1813198' AS new_lat, '-117.3236520' AS new_lng
+  UNION ALL SELECT 4734 AS post_id, '32.6411650' AS new_lat, '-116.9877710' AS new_lng
+  UNION ALL SELECT 4735 AS post_id, '34.0689588' AS new_lat, '-118.4422220' AS new_lng
+  UNION ALL SELECT 4736 AS post_id, '34.0620438' AS new_lat, '-118.1736570' AS new_lng
+  UNION ALL SELECT 4737 AS post_id, '34.0732310' AS new_lat, '-117.7655790' AS new_lng
+  UNION ALL SELECT 4738 AS post_id, '33.9668180' AS new_lat, '-118.4225250' AS new_lng
+  UNION ALL SELECT 4739 AS post_id, '34.0096810' AS new_lat, '-117.3310360' AS new_lng
+  UNION ALL SELECT 4740 AS post_id, '33.8664160' AS new_lat, '-118.2571720' AS new_lng
+  UNION ALL SELECT 4741 AS post_id, '33.8822450' AS new_lat, '-117.8894040' AS new_lng
+  UNION ALL SELECT 4742 AS post_id, '34.0209150' AS new_lat, '-118.2855310' AS new_lng
+  UNION ALL SELECT 4743 AS post_id, '33.1278890' AS new_lat, '-117.1595050' AS new_lng
+  UNION ALL SELECT 4744 AS post_id, '32.8778690' AS new_lat, '-117.2391700' AS new_lng
+  UNION ALL SELECT 4745 AS post_id, '32.7482130' AS new_lat, '-117.1677100' AS new_lng
+  UNION ALL SELECT 4746 AS post_id, '32.7136230' AS new_lat, '-117.1601600' AS new_lng
+  UNION ALL SELECT 4769 AS post_id, '38.9585490' AS new_lat, '-95.2476230' AS new_lng
+  UNION ALL SELECT 4770 AS post_id, '34.9814870' AS new_lat, '-101.9158450' AS new_lng
+  UNION ALL SELECT 4771 AS post_id, '33.5836590' AS new_lat, '-101.8761830' AS new_lng
+  UNION ALL SELECT 4772 AS post_id, '33.2258700' AS new_lat, '-97.1288200' AS new_lng
+  UNION ALL SELECT 4773 AS post_id, '30.2862008' AS new_lat, '-97.7392900' AS new_lng
+  UNION ALL SELECT 4774 AS post_id, '30.7133350' AS new_lat, '-95.5503400' AS new_lng
+  UNION ALL SELECT 4775 AS post_id, '30.2680720' AS new_lat, '-97.7428060' AS new_lng
+  UNION ALL SELECT 4776 AS post_id, '29.8880710' AS new_lat, '-97.9444450' AS new_lng
+  UNION ALL SELECT 4777 AS post_id, '29.7219620' AS new_lat, '-95.3400880' AS new_lng
+  UNION ALL SELECT 4778 AS post_id, '31.9664100' AS new_lat, '-94.0529300' AS new_lng
+  UNION ALL SELECT 4779 AS post_id, '35.2310930' AS new_lat, '-82.2312350' AS new_lng
+  UNION ALL SELECT 4780 AS post_id, '34.0328900' AS new_lat, '-84.5810820' AS new_lng
+  UNION ALL SELECT 4781 AS post_id, '30.4407890' AS new_lat, '-84.2902290' AS new_lng
+  UNION ALL SELECT 4782 AS post_id, '28.5968730' AS new_lat, '-81.2033070' AS new_lng
+  UNION ALL SELECT 4783 AS post_id, '25.7601910' AS new_lat, '-80.3731350' AS new_lng
+  UNION ALL SELECT 4785 AS post_id, '43.6850940' AS new_lat, '-85.4828080' AS new_lng
+  UNION ALL SELECT 4786 AS post_id, '43.5822140' AS new_lat, '-84.7762510' AS new_lng
+  UNION ALL SELECT 4787 AS post_id, '43.5130570' AS new_lat, '-83.9644660' AS new_lng
+  UNION ALL SELECT 4788 AS post_id, '43.2511470' AS new_lat, '-86.1978160' AS new_lng
+  UNION ALL SELECT 4789 AS post_id, '42.9638140' AS new_lat, '-85.8883350' AS new_lng
+  UNION ALL SELECT 4790 AS post_id, '42.1792550' AS new_lat, '-84.7714828' AS new_lng
+  UNION ALL SELECT 4791 AS post_id, '42.2762220' AS new_lat, '-83.7413040' AS new_lng
+  UNION ALL SELECT 4792 AS post_id, '42.7377300' AS new_lat, '-84.5533800' AS new_lng
+  UNION ALL SELECT 4793 AS post_id, '42.7195970' AS new_lat, '-84.4906850' AS new_lng
+  UNION ALL SELECT 4794 AS post_id, '42.0956220' AS new_lat, '-86.3933370' AS new_lng
+  UNION ALL SELECT 4795 AS post_id, '42.2264890' AS new_lat, '-85.6818110' AS new_lng
+  UNION ALL SELECT 4796 AS post_id, '42.2834520' AS new_lat, '-85.6125930' AS new_lng
+  UNION ALL SELECT 4797 AS post_id, '42.2700090' AS new_lat, '-83.7300040' AS new_lng
+  UNION ALL SELECT 4798 AS post_id, '42.2633700' AS new_lat, '-83.6637200' AS new_lng
+  UNION ALL SELECT 4800 AS post_id, '42.2518260' AS new_lat, '-83.6272160' AS new_lng
+  UNION ALL SELECT 4801 AS post_id, '42.1793448' AS new_lat, '-84.7716040' AS new_lng
+  UNION ALL SELECT 4802 AS post_id, '42.3569640' AS new_lat, '-83.0651830' AS new_lng
+  UNION ALL SELECT 4803 AS post_id, '42.3272460' AS new_lat, '-83.0544420' AS new_lng
+  UNION ALL SELECT 4804 AS post_id, '39.5095010' AS new_lat, '-84.7345050' AS new_lng
+  UNION ALL SELECT 4805 AS post_id, '39.7801090' AS new_lat, '-84.0646630' AS new_lng
+  UNION ALL SELECT 4806 AS post_id, '39.3248070' AS new_lat, '-82.1015710' AS new_lng
+  UNION ALL SELECT 4807 AS post_id, '41.5024200' AS new_lat, '-81.6751230' AS new_lng
+  UNION ALL SELECT 4808 AS post_id, '40.7967030' AS new_lat, '-77.8628560' AS new_lng
+  UNION ALL SELECT 4809 AS post_id, '40.5080760' AS new_lat, '-75.7817930' AS new_lng
+  UNION ALL SELECT 4810 AS post_id, '41.8533008' AS new_lat, '-75.7938480' AS new_lng
+  UNION ALL SELECT 4811 AS post_id, '40.4499130' AS new_lat, '-80.0154920' AS new_lng
+  UNION ALL SELECT 4812 AS post_id, '40.0872110' AS new_lat, '-75.1047970' AS new_lng
+  UNION ALL SELECT 4813 AS post_id, '35.1903230' AS new_lat, '-111.6514780' AS new_lng
+  UNION ALL SELECT 4814 AS post_id, '33.4169000' AS new_lat, '-111.9363790' AS new_lng
+  UNION ALL SELECT 4815 AS post_id, '32.2318980' AS new_lat, '-110.9535450' AS new_lng
+  UNION ALL SELECT 4816 AS post_id, '40.4793420' AS new_lat, '-104.9581570' AS new_lng
+  UNION ALL SELECT 4817 AS post_id, '40.0041020' AS new_lat, '-105.2681210' AS new_lng
+  UNION ALL SELECT 4818 AS post_id, '39.7459760' AS new_lat, '-105.0075230' AS new_lng
+  UNION ALL SELECT 4819 AS post_id, '42.9985800' AS new_lat, '-92.3615700' AS new_lng
+  UNION ALL SELECT 4820 AS post_id, '44.8718940' AS new_lat, '-91.9267790' AS new_lng
+  UNION ALL SELECT 4821 AS post_id, '39.9517220' AS new_lat, '-86.0087310' AS new_lng
+  UNION ALL SELECT 4822 AS post_id, '35.8437020' AS new_lat, '-86.3706720' AS new_lng
+  UNION ALL SELECT 4823 AS post_id, '33.2095360' AS new_lat, '-87.5460660' AS new_lng
+) src ON p.ID = src.post_id
+WHERE p.post_type = 'campus' AND p.post_status = 'publish'
+GROUP BY p.ID, p.post_title, src.new_lat, src.new_lng ORDER BY p.ID;

@@ -1,0 +1,35 @@
+.DS_Store
+*.log
+.env
+.env.*
+!.env.example
+
+# Unrelated local artifacts in workspace root
+painrex_blogs.*
+wp_posts*.csv
+
+# Node / admin web
+**/node_modules/
+admin-web/dist/
+admin-web/dist-debug/
+admin-web/functions/lib/
+admin-web/functions/node_modules/
+
+# Flutter / mobile
+mobile-app/.fvm/flutter_sdk
+mobile-app/.fvm/versions/
+mobile-app/.fvm/release
+mobile-app/.dart_tool/
+mobile-app/build/
+mobile-app/.flutter-plugins-dependencies
+mobile-app/android/local.properties
+mobile-app/android/.gradle/
+mobile-app/ios/Pods/
+mobile-app/ios/.symlinks/
+
+# Firebase / IDE
+.firebase/
+firebase-debug.log
+firebase-debug.*.log
+.idea/
+.vscode/

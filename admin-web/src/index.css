@@ -1,0 +1,82 @@
+@import url("https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap");
+@import "tailwindcss";
+
+@theme {
+  --color-yhgc-crimson: #8b1a1a;
+  --color-yhgc-gold: #c9a96e;
+  --color-yhgc-black: #0a0a0a;
+  --color-yhgc-offwhite: #f8f6f2;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: Poppins, Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  background: radial-gradient(circle at top, #faf7f0 0%, #eef1f5 50%, #e9edf2 100%);
+  color: #111827;
+}
+
+* {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 420ms ease-out;
+}
+
+.legal-html h1,
+.legal-html h2,
+.legal-html h3 {
+  color: #111827;
+  font-weight: 600;
+  margin: 0 0 0.75rem;
+}
+
+.legal-html h2 {
+  font-size: 1.35rem;
+}
+
+.legal-html p,
+.legal-html li {
+  line-height: 1.65;
+  color: #374151;
+}
+
+.legal-html p {
+  margin: 0 0 0.75rem;
+}
+
+.legal-html ul,
+.legal-html ol {
+  margin: 0 0 0.75rem 1.25rem;
+}
+
+.legal-html ul {
+  list-style: disc;
+}
+
+.legal-html ol {
+  list-style: decimal;
+}
+
+.legal-html a {
+  color: #8b1a1a;
+  text-decoration: underline;
+}
