@@ -1,7 +1,10 @@
 import { create } from "zustand"
 import { v4 as uuid } from "uuid"
-import { handlePersistSuccessNotifyClients, resetPortfolioPersistBaseline } from "../services/clientPortfolioPush"
-import { dataService } from "../services/dataService"
+import {
+  collectClientsTouchedByPortfolioDiff,
+  enqueuePortfolioUpdateOutbox,
+} from "../services/clientPortfolioPush"
+import { COLLECTION_KEYS, dataService, type CollectionKey, type EntityRow } from "../services/dataService"
 import type {
   AccountantLink,
   AppSnapshot,
@@ -210,6 +213,71 @@ function isBlank(value: string | undefined): boolean {
   return !(value ?? "").trim().length
 }
 
+/** Last snapshot already written to the backend, so local edits persist only their own deltas. */
+let writeBaseline: AppSnapshot | null = null
+/** True while a realtime server update is being applied, so we don't echo it back as a write. */
+let applyingRemote = false
+let unsubscribeData: (() => void) | null = null
+
+// Coalesce a burst of portfolio edits into a single "portfolio updated" push per affected client.
+const pendingPushClients = new Set<string>()
+let pushTimer: ReturnType<typeof setTimeout> | null = null
+
+function schedulePush(): void {
+  if (pushTimer) clearTimeout(pushTimer)
+  pushTimer = setTimeout(() => {
+    pushTimer = null
+    void flushPush()
+  }, 4000)
+}
+
+async function flushPush(): Promise<void> {
+  if (pushTimer) {
+    clearTimeout(pushTimer)
+    pushTimer = null
+  }
+  if (pendingPushClients.size === 0) return
+  const ids = [...pendingPushClients]
+  pendingPushClients.clear()
+  try {
+    await enqueuePortfolioUpdateOutbox(ids)
+  } catch {
+    // Non-blocking: records are already saved; a later edit re-triggers the notification.
+  }
+}
+
+function rowsById(rows: EntityRow[]): Map<string, EntityRow> {
+  const m = new Map<string, EntityRow>()
+  for (const r of rows) m.set(String(r.id), r)
+  return m
+}
+
+/** Persist only the records that changed between two snapshots — per-document writes, never the whole DB. */
+async function writeSnapshotDiff(prev: AppSnapshot, next: AppSnapshot): Promise<void> {
+  const ops: Array<Promise<void>> = []
+  for (const key of COLLECTION_KEYS) {
+    const prevById = rowsById(prev[key] as unknown as EntityRow[])
+    const nextById = rowsById(next[key] as unknown as EntityRow[])
+    for (const [id, row] of nextById) {
+      const before = prevById.get(id)
+      if (!before || JSON.stringify(before) !== JSON.stringify(row)) {
+        ops.push(dataService.upsert(key as CollectionKey, row))
+      }
+    }
+    for (const id of prevById.keys()) {
+      if (!nextById.has(id)) ops.push(dataService.remove(key as CollectionKey, id))
+    }
+  }
+
+  const touched = collectClientsTouchedByPortfolioDiff(prev, next)
+  for (const cid of touched) pendingPushClients.add(cid)
+  if (touched.size > 0) schedulePush()
+
+  const results = await Promise.allSettled(ops)
+  const failed = results.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined
+  if (failed) throw failed.reason
+}
+
 export const useAppStore = create<AppState>((set, get) => ({
   snapshot: null,
   loading: false,
@@ -218,32 +286,47 @@ export const useAppStore = create<AppState>((set, get) => ({
   clearActionNotice: () => set({ actionNotice: null }),
   setActionNotice: (actionNotice) => set({ actionNotice }),
   init: async () => {
-    set({ loading: true, error: undefined, actionNotice: null, persisting: false })
-    try {
-      const loaded = await dataService.loadSnapshot()
-      let appliedLoaded = false
-      set((state) => {
-        const cur = state.snapshot
-        if (cur?.updatedAt && loaded.updatedAt && cur.updatedAt > loaded.updatedAt) {
-          return { loading: false, error: undefined }
-        }
-        appliedLoaded = true
-        return { snapshot: loaded, loading: false, error: undefined }
-      })
-      if (appliedLoaded) resetPortfolioPersistBaseline(loaded)
-    } catch (err) {
-      const message =
-        err instanceof Error && err.message.trim().length
-          ? err.message.trim()
-          : "We could not load your data. Check your connection and try again."
-      set({
-        loading: false,
-        error: message,
-        snapshot: null,
-      })
+    // Idempotent: React StrictMode / focus handlers may call this repeatedly.
+    if (unsubscribeData) {
+      if (get().snapshot) set({ loading: false })
+      return
     }
+    set({ loading: true, error: undefined, actionNotice: null, persisting: false })
+
+    // 1) Stream every record change from the backend into the store in realtime.
+    unsubscribeData = dataService.subscribe(
+      (remote) => {
+        applyingRemote = true
+        writeBaseline = remote
+        set({ snapshot: remote, loading: false, error: undefined })
+        applyingRemote = false
+      },
+      (err) => {
+        if (get().snapshot) return // already have data; a transient listener error is non-fatal
+        const message =
+          err instanceof Error && err.message.trim().length
+            ? err.message.trim()
+            : "We could not load your data. Check your connection and try again."
+        set({ loading: false, error: message })
+      },
+    )
+
+    // 2) When a local edit changes the snapshot, write just that record (skip echoes of server updates).
+    useAppStore.subscribe((state, prev) => {
+      if (applyingRemote) return
+      if (!state.snapshot || state.snapshot === prev.snapshot) return
+      const base = writeBaseline ?? prev.snapshot
+      const next = state.snapshot
+      writeBaseline = next
+      if (!base) return
+      void writeSnapshotDiff(base, next).catch((err) => {
+        set({ actionNotice: { kind: "error", message: humanizePersistError(err) } })
+      })
+    })
   },
   persist: async () => {
+    // Edits now save per-record as they happen; this just flushes the pending client notification
+    // and confirms, so the existing "Save" affordances keep working.
     const snapshot = get().snapshot
     if (!snapshot) {
       set({
@@ -255,20 +338,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       return
     }
     set({ persisting: true })
-    try {
-      await dataService.saveSnapshot({ ...snapshot, updatedAt: now() })
-      const after = get().snapshot
-      if (after) await handlePersistSuccessNotifyClients(after)
-      set({
-        persisting: false,
-        actionNotice: { kind: "success", message: "All changes were saved." },
-      })
-    } catch (err) {
-      set({
-        persisting: false,
-        actionNotice: { kind: "error", message: humanizePersistError(err) },
-      })
-    }
+    await flushPush()
+    set({
+      persisting: false,
+      actionNotice: { kind: "success", message: "All changes were saved." },
+    })
   },
   addClient: ({ fullName, email }) => {
     const current = get().snapshot

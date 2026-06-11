@@ -1,12 +1,50 @@
 import { initializeApp, getApps } from "firebase/app"
-import { collection, doc, getDoc, getDocs, getFirestore, setDoc, writeBatch } from "firebase/firestore"
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDoc,
+  getDocs,
+  getFirestore,
+  onSnapshot,
+  setDoc,
+  writeBatch,
+} from "firebase/firestore"
 import { appSettings, activeBackendMode } from "../config/settings"
 import { seedSnapshot } from "../data/seed"
 import type { AppSnapshot } from "../types/models"
 
+export type CollectionKey = keyof Omit<AppSnapshot, "updatedAt">
+
+export const COLLECTION_KEYS: CollectionKey[] = [
+  "clients",
+  "companies",
+  "properties",
+  "constructionProjects",
+  "constructionStages",
+  "financeRecords",
+  "incomeRows",
+  "invoices",
+  "insuranceRecords",
+  "assets",
+  "notifications",
+  "accountantLinks",
+]
+
+export type EntityRow = { id: string } & Record<string, unknown>
+
 export interface DataService {
+  /**
+   * Live subscription. Calls `onChange` with the latest full snapshot whenever any record changes
+   * (Firestore realtime listeners; localStorage mirror in mock mode). Returns an unsubscribe.
+   */
+  subscribe(onChange: (snapshot: AppSnapshot) => void, onError?: (err: unknown) => void): () => void
+  /** Write a single record (create or replace), nothing else. */
+  upsert(collectionKey: CollectionKey, entity: EntityRow): Promise<void>
+  /** Delete a single record by id. */
+  remove(collectionKey: CollectionKey, id: string): Promise<void>
+  /** One-shot read (used for seeding / fallbacks). */
   loadSnapshot(): Promise<AppSnapshot>
-  saveSnapshot(snapshot: AppSnapshot): Promise<void>
 }
 
 /** Firestore rejects `undefined` anywhere in document data; strip recursively before writes. */
@@ -48,6 +86,30 @@ function stripFirestoreTimestamps<T>(input: T): T {
   return out as T
 }
 
+function emptyCache(): Record<CollectionKey, EntityRow[]> {
+  return {
+    clients: [],
+    companies: [],
+    properties: [],
+    constructionProjects: [],
+    constructionStages: [],
+    financeRecords: [],
+    incomeRows: [],
+    invoices: [],
+    insuranceRecords: [],
+    assets: [],
+    notifications: [],
+    accountantLinks: [],
+  }
+}
+
+function snapshotFromCache(cache: Record<CollectionKey, EntityRow[]>): AppSnapshot {
+  return normalizeSnapshot({
+    ...(cache as unknown as Partial<AppSnapshot>),
+    updatedAt: new Date().toISOString(),
+  })
+}
+
 function normalizeSnapshot(input: Partial<AppSnapshot> | null | undefined): AppSnapshot {
   if (!input) return seedSnapshot
   return {
@@ -67,53 +129,64 @@ function normalizeSnapshot(input: Partial<AppSnapshot> | null | undefined): AppS
   }
 }
 
-async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
-  let timer: ReturnType<typeof setTimeout> | null = null
-  try {
-    return await Promise.race<T | null>([
-      promise,
-      new Promise<null>((resolve) => {
-        timer = setTimeout(() => resolve(null), ms)
-      }),
-    ])
-  } finally {
-    if (timer) clearTimeout(timer)
-  }
-}
-
 class MockDataService implements DataService {
   /** Bump when default seed shape changes so browsers pick up new demo data without manual clear. */
   private key = "yhgc-admin-snapshot-v2"
+  private listeners = new Set<(snapshot: AppSnapshot) => void>()
 
-  async loadSnapshot(): Promise<AppSnapshot> {
+  private read(): AppSnapshot {
     const raw = localStorage.getItem(this.key)
     if (!raw) return seedSnapshot
-    return normalizeSnapshot(JSON.parse(raw) as Partial<AppSnapshot>)
+    try {
+      return normalizeSnapshot(JSON.parse(raw) as Partial<AppSnapshot>)
+    } catch {
+      return seedSnapshot
+    }
   }
 
-  async saveSnapshot(snapshot: AppSnapshot): Promise<void> {
-    const clean = stripUndefinedForFirestore(snapshot)
-    localStorage.setItem(this.key, JSON.stringify(clean))
+  private write(snapshot: AppSnapshot): void {
+    localStorage.setItem(this.key, JSON.stringify(stripUndefinedForFirestore(snapshot)))
+  }
+
+  private emit(): void {
+    const snap = this.read()
+    for (const fn of this.listeners) fn(snap)
+  }
+
+  async loadSnapshot(): Promise<AppSnapshot> {
+    return this.read()
+  }
+
+  subscribe(onChange: (snapshot: AppSnapshot) => void): () => void {
+    this.listeners.add(onChange)
+    // Emit current state on next tick so callers can finish wiring up first.
+    queueMicrotask(() => onChange(this.read()))
+    return () => {
+      this.listeners.delete(onChange)
+    }
+  }
+
+  async upsert(collectionKey: CollectionKey, entity: EntityRow): Promise<void> {
+    const snap = this.read()
+    const list = (snap[collectionKey] as unknown as EntityRow[]).filter((r) => r.id !== entity.id)
+    list.unshift(entity)
+    const next = { ...snap, [collectionKey]: list, updatedAt: new Date().toISOString() } as AppSnapshot
+    this.write(next)
+    this.emit()
+  }
+
+  async remove(collectionKey: CollectionKey, id: string): Promise<void> {
+    const snap = this.read()
+    const list = (snap[collectionKey] as unknown as EntityRow[]).filter((r) => r.id !== id)
+    const next = { ...snap, [collectionKey]: list, updatedAt: new Date().toISOString() } as AppSnapshot
+    this.write(next)
+    this.emit()
   }
 }
 
 class FirebaseDataService implements DataService {
   private db = this.initDb()
-  private snapshotPath = doc(this.db, "appSnapshots", "adminPrototype")
-  private readonly collectionKeys: Array<keyof Omit<AppSnapshot, "updatedAt">> = [
-    "clients",
-    "companies",
-    "properties",
-    "constructionProjects",
-    "constructionStages",
-    "financeRecords",
-    "incomeRows",
-    "invoices",
-    "insuranceRecords",
-    "assets",
-    "notifications",
-    "accountantLinks",
-  ]
+  private seeded = false
 
   private initDb() {
     const app = getApps().length
@@ -129,78 +202,112 @@ class FirebaseDataService implements DataService {
     return getFirestore(app)
   }
 
-  async loadSnapshot(): Promise<AppSnapshot> {
-    const partialFromCollections = await withTimeout(this.loadFromCollections().catch(() => null), 7000)
-    if (partialFromCollections) {
-      // Rows come from subcollections; the legacy single doc carries the real last-saved `updatedAt`.
-      // Using "now" here made every background reload look newer than local edits and wiped unpersisted rows.
-      const legacySnap = await getDoc(this.snapshotPath)
-      let serverUpdatedAt = "1970-01-01T00:00:00.000Z"
-      if (legacySnap.exists()) {
-        const legacy = stripFirestoreTimestamps(legacySnap.data() as Partial<AppSnapshot>)
-        if (typeof legacy.updatedAt === "string" && legacy.updatedAt.trim()) serverUpdatedAt = legacy.updatedAt.trim()
-      }
-      return normalizeSnapshot({ ...partialFromCollections, updatedAt: serverUpdatedAt })
+  subscribe(onChange: (snapshot: AppSnapshot) => void, onError?: (err: unknown) => void): () => void {
+    const cache = emptyCache()
+    const reported = new Set<CollectionKey>()
+    let stopped = false
+    let emitTimer: ReturnType<typeof setTimeout> | null = null
+
+    const scheduleEmit = () => {
+      if (emitTimer) return
+      // Coalesce the burst of listener callbacks (one per collection) into a single store update.
+      emitTimer = setTimeout(() => {
+        emitTimer = null
+        if (stopped) return
+        onChange(snapshotFromCache(cache))
+        void this.seedIfEmpty(reported, cache)
+      }, 0)
     }
 
-    // Backward compatibility: migrate the legacy single-doc snapshot once, keep it as backup.
-    const legacySnap = await getDoc(this.snapshotPath)
-    if (!legacySnap.exists()) {
-      const seedClean = stripUndefinedForFirestore(seedSnapshot)
-      await setDoc(this.snapshotPath, seedClean)
-      void this.saveToCollections(seedClean).catch(() => {})
-      return normalizeSnapshot(seedSnapshot)
-    }
-    const migrated = normalizeSnapshot(stripFirestoreTimestamps(legacySnap.data() as Partial<AppSnapshot>))
-    void this.saveToCollections(migrated).catch(() => {})
-    return migrated
-  }
-
-  async saveSnapshot(snapshot: AppSnapshot): Promise<void> {
-    const clean = stripUndefinedForFirestore(snapshot)
-    // Keep legacy doc as backup in option A.
-    await setDoc(this.snapshotPath, clean, { merge: false })
-    await this.saveToCollections(clean)
-  }
-
-  private async loadFromCollections(): Promise<Partial<AppSnapshot> | null> {
-    const listMap = await Promise.all(
-      this.collectionKeys.map(async (key) => {
-        const col = collection(this.db, key)
-        const snaps = await getDocs(col)
-        const rows = snaps.docs.map((d) => stripFirestoreTimestamps({ id: d.id, ...(d.data() as object) }))
-        return [key, rows] as const
-      }),
+    const unsubs = COLLECTION_KEYS.map((key) =>
+      onSnapshot(
+        collection(this.db, key),
+        (qs) => {
+          cache[key] = qs.docs.map((d) =>
+            stripFirestoreTimestamps({ id: d.id, ...(d.data() as object) } as EntityRow),
+          )
+          reported.add(key)
+          scheduleEmit()
+        },
+        (err) => {
+          reported.add(key)
+          onError?.(err)
+        },
+      ),
     )
-    const asObject = Object.fromEntries(listMap) as Partial<AppSnapshot>
-    const hasAnyData = this.collectionKeys.some((key) => ((asObject[key] as unknown[]) ?? []).length > 0)
-    if (!hasAnyData) return null
-    return asObject
+
+    return () => {
+      stopped = true
+      if (emitTimer) clearTimeout(emitTimer)
+      for (const u of unsubs) u()
+    }
   }
 
-  private async saveToCollections(snapshot: AppSnapshot): Promise<void> {
+  /** First run on an empty project: write the demo seed once so listeners populate the UI. */
+  private async seedIfEmpty(
+    reported: Set<CollectionKey>,
+    cache: Record<CollectionKey, EntityRow[]>,
+  ): Promise<void> {
+    if (this.seeded) return
+    if (reported.size < COLLECTION_KEYS.length) return // wait until every collection has reported
+    const hasAny = COLLECTION_KEYS.some((key) => cache[key].length > 0)
+    if (hasAny) {
+      this.seeded = true
+      return
+    }
+    // Guard against a legacy single-doc snapshot from before the per-collection migration.
+    const legacy = await getDoc(doc(this.db, "appSnapshots", "adminPrototype")).catch(() => null)
+    if (legacy?.exists()) {
+      const data = normalizeSnapshot(stripFirestoreTimestamps(legacy.data() as Partial<AppSnapshot>))
+      await this.seedFromSnapshot(data)
+      this.seeded = true
+      return
+    }
+    await this.seedFromSnapshot(seedSnapshot)
+    this.seeded = true
+  }
+
+  private async seedFromSnapshot(snapshot: AppSnapshot): Promise<void> {
     const batch = writeBatch(this.db)
-    for (const key of this.collectionKeys) {
-      const colRef = collection(this.db, key)
-      const existing = await getDocs(colRef)
-      const nextRows = snapshot[key] as unknown as Array<{ id: string } & Record<string, unknown>>
-      const nextIds = new Set(nextRows.map((row) => String(row.id)))
-
-      // Remove records deleted in UI.
-      for (const docSnap of existing.docs) {
-        if (!nextIds.has(docSnap.id)) {
-          batch.delete(docSnap.ref)
-        }
-      }
-
-      // Upsert current records by id.
-      for (const row of nextRows) {
-        const id = String(row.id)
-        const { id: _ignore, ...payload } = row
-        batch.set(doc(this.db, key, id), stripUndefinedForFirestore(payload), { merge: false })
+    for (const key of COLLECTION_KEYS) {
+      const rows = snapshot[key] as unknown as EntityRow[]
+      for (const row of rows) {
+        const { id, ...payload } = row
+        batch.set(doc(this.db, key, String(id)), stripUndefinedForFirestore(payload), { merge: true })
       }
     }
     await batch.commit()
+  }
+
+  async upsert(collectionKey: CollectionKey, entity: EntityRow): Promise<void> {
+    const { id, ...payload } = entity
+    // `clients` carries fields the admin does not model (e.g. mobile-set appPassword); merge to preserve them.
+    const merge = collectionKey === "clients"
+    await setDoc(doc(this.db, collectionKey, String(id)), stripUndefinedForFirestore(payload), { merge })
+  }
+
+  async remove(collectionKey: CollectionKey, id: string): Promise<void> {
+    await deleteDoc(doc(this.db, collectionKey, String(id)))
+  }
+
+  async loadSnapshot(): Promise<AppSnapshot> {
+    const cache = emptyCache()
+    let hasAny = false
+    await Promise.all(
+      COLLECTION_KEYS.map(async (key) => {
+        const snaps = await getDocs(collection(this.db, key))
+        cache[key] = snaps.docs.map((d) =>
+          stripFirestoreTimestamps({ id: d.id, ...(d.data() as object) } as EntityRow),
+        )
+        if (cache[key].length > 0) hasAny = true
+      }),
+    )
+    if (hasAny) return snapshotFromCache(cache)
+    const legacy = await getDoc(doc(this.db, "appSnapshots", "adminPrototype")).catch(() => null)
+    if (legacy?.exists()) {
+      return normalizeSnapshot(stripFirestoreTimestamps(legacy.data() as Partial<AppSnapshot>))
+    }
+    return seedSnapshot
   }
 }
 

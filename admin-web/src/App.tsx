@@ -1102,21 +1102,8 @@ function AdminApp() {
     void init()
   }, [init])
 
-  useEffect(() => {
-    if (!isAuthenticated) return
-    const onFocus = () => void init()
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") void init()
-    }
-    window.addEventListener("focus", onFocus)
-    document.addEventListener("visibilitychange", onVisibility)
-    const interval = window.setInterval(() => void init(), 30000)
-    return () => {
-      window.removeEventListener("focus", onFocus)
-      document.removeEventListener("visibilitychange", onVisibility)
-      window.clearInterval(interval)
-    }
-  }, [init, isAuthenticated])
+  // Realtime Firestore listeners (set up in store.init) keep the admin in sync continuously,
+  // so the old focus/visibility/30s polling — which raced with saves and reverted new rows — is gone.
 
   useEffect(() => {
     if (!detailPropertyId) {
