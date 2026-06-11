@@ -1055,24 +1055,61 @@ class FirebaseRepository implements AppRepository {
     late final StreamController<PortfolioSnapshot> controller;
     final subs = <StreamSubscription<dynamic>>[];
 
-    Future<void> emit() async {
-      final data = await _loadCompositeData();
-      final next = await buildPortfolioSnapshotFromMap(
-        data,
-        _fallback,
-        scopeClientId: _scopeForBuild(),
+    // Per-collection cache updated incrementally: each listener only refreshes its own
+    // collection from the event it received, instead of re-reading all 12 on every change.
+    final cache = <String, List<Map<String, dynamic>>>{
+      for (final key in _collectionKeys) key: <Map<String, dynamic>>[],
+    };
+    Map<String, dynamic>? legacyDoc;
+    final reported = <String>{};
+    Timer? debounce;
+
+    void emit() {
+      final hasRows = _collectionKeys.any((k) => cache[k]!.isNotEmpty);
+      final Map<String, dynamic>? data = hasRows
+          ? <String, dynamic>{
+              for (final key in _collectionKeys) key: cache[key],
+              'updatedAt': DateTime.now().toIso8601String(),
+            }
+          : legacyDoc; // fall back to the legacy single-doc snapshot until collections exist
+      unawaited(
+        buildPortfolioSnapshotFromMap(data, _fallback, scopeClientId: _scopeForBuild())
+            .then((next) {
+          if (!controller.isClosed) controller.add(next);
+        }),
       );
-      if (!controller.isClosed) controller.add(next);
+    }
+
+    void scheduleEmit() {
+      // Coalesce the burst of per-collection callbacks (one admin save touches several) into one rebuild.
+      debounce?.cancel();
+      debounce = Timer(const Duration(milliseconds: 60), () {
+        if (reported.length < _collectionKeys.length) return; // wait for first full load
+        emit();
+      });
     }
 
     controller = StreamController<PortfolioSnapshot>(
-      onListen: () async {
+      onListen: () {
         for (final key in _collectionKeys) {
           subs.add(
             _db.collection(key).snapshots().listen(
-                  (_) => unawaited(emit()),
-                  onError: controller.addError,
-                ),
+              (qs) {
+                cache[key] = qs.docs.map((d) {
+                  final m = Map<String, dynamic>.from(d.data());
+                  m['id'] = d.id;
+                  return m;
+                }).toList();
+                reported.add(key);
+                scheduleEmit();
+              },
+              onError: (Object e, StackTrace st) {
+                // Don't let one collection's error stall the "all reported" first paint.
+                reported.add(key);
+                controller.addError(e, st);
+                scheduleEmit();
+              },
+            ),
           );
         }
         subs.add(
@@ -1080,11 +1117,14 @@ class FirebaseRepository implements AppRepository {
               .collection('appSnapshots')
               .doc('adminPrototype')
               .snapshots()
-              .listen((_) => unawaited(emit()), onError: controller.addError),
+              .listen((doc) {
+            legacyDoc = doc.data();
+            scheduleEmit();
+          }, onError: controller.addError),
         );
-        await emit();
       },
       onCancel: () async {
+        debounce?.cancel();
         for (final s in subs) {
           await s.cancel();
         }
