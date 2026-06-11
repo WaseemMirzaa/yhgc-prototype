@@ -11,12 +11,6 @@ import type {
   Invoice,
 } from "../types/models"
 
-let persistBaseline: AppSnapshot | null = null
-
-export function resetPortfolioPersistBaseline(snapshot: AppSnapshot): void {
-  persistBaseline = structuredClone(snapshot)
-}
-
 function initFirestoreDb() {
   const app = getApps().length
     ? getApps()[0]
@@ -171,17 +165,4 @@ export async function enqueuePortfolioUpdateOutbox(clientIds: string[]): Promise
     data: { source: "admin_portfolio_save" },
     createdAt: serverTimestamp(),
   })
-}
-
-export async function handlePersistSuccessNotifyClients(next: AppSnapshot): Promise<void> {
-  const prev = persistBaseline
-  persistBaseline = structuredClone(next)
-  if (!prev || activeBackendMode !== "firebase") return
-  const touched = collectClientsTouchedByPortfolioDiff(prev, next)
-  if (touched.size === 0) return
-  try {
-    await enqueuePortfolioUpdateOutbox([...touched])
-  } catch {
-    // Non-blocking: save already succeeded; user can retry save to re-send if needed.
-  }
 }
