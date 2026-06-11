@@ -3,6 +3,9 @@ import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:yhgc_mobile_app/src/config/app_settings.dart';
+import 'package:yhgc_mobile_app/src/i18n/app_translations.dart';
+import 'package:yhgc_mobile_app/src/i18n/formatters.dart';
+import 'package:yhgc_mobile_app/src/i18n/locale_controller.dart';
 import 'package:yhgc_mobile_app/src/controllers/app_controller.dart';
 import 'package:yhgc_mobile_app/src/controllers/auth_controller.dart';
 import 'package:yhgc_mobile_app/src/controllers/mobile_config_controller.dart';
@@ -182,17 +185,24 @@ Widget yhgcAppBarTitle(String title, {double logoHeight = 26}) {
 }
 
 class YhgcApp extends StatelessWidget {
-  const YhgcApp({super.key});
+  const YhgcApp({super.key, this.initialLocale = LocaleController.fr});
+
+  final Locale initialLocale;
+
   @override
   Widget build(BuildContext context) {
     final repository = buildRepo();
     Get.put<AppRepository>(repository, permanent: true);
+    Get.put(LocaleController()..locale.value = initialLocale, permanent: true);
     Get.put(MobileConfigController());
     Get.put(AuthController());
     Get.put(AppController(repository: repository));
     return GetMaterialApp(
       debugShowCheckedModeBanner: false,
       theme: buildTheme(),
+      translations: AppTranslations(),
+      locale: initialLocale,
+      fallbackLocale: LocaleController.fallback,
       home: const AppBootstrapPage(),
       builder: (context, child) => child ?? const SizedBox.shrink(),
     );
@@ -262,7 +272,7 @@ class SplashPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 36),
                 Text(
-                  '"Your wealth, managed\nwith precision and discretion"',
+                  '"${'splash.tagline'.tr}"',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: Colors.white.withValues(alpha: 0.72),
@@ -839,14 +849,14 @@ class ShellPage extends StatelessWidget {
         body: AnimatedSwitcher(
           duration: const Duration(milliseconds: 280),
           child: app.loading.value
-              ? const Center(
-                  key: ValueKey('shell-loading'),
+              ? Center(
+                  key: const ValueKey('shell-loading'),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      CircularProgressIndicator(color: AppColors.crimson),
-                      SizedBox(height: 12),
-                      Text('Loading your portfolio...'),
+                      const CircularProgressIndicator(color: AppColors.crimson),
+                      const SizedBox(height: 12),
+                      Text('dashboard.loading'.tr),
                     ],
                   ),
                 )
@@ -874,12 +884,12 @@ class ShellPage extends StatelessWidget {
               onDestinationSelected: (i) => app.tab.value = i,
               backgroundColor: Colors.transparent,
               indicatorColor: AppColors.crimson.withValues(alpha: 0.3),
-              destinations: const [
-                NavigationDestination(icon: Icon(Icons.home_rounded), label: 'Home'),
-                NavigationDestination(icon: Icon(Icons.folder_rounded), label: 'Documents'),
-                NavigationDestination(icon: Icon(Icons.receipt_long_rounded), label: 'Invoices'),
-                NavigationDestination(icon: Icon(Icons.notifications_rounded), label: 'Alerts'),
-                NavigationDestination(icon: Icon(Icons.person_rounded), label: 'Account'),
+              destinations: [
+                NavigationDestination(icon: const Icon(Icons.home_rounded), label: 'nav.home'.tr),
+                NavigationDestination(icon: const Icon(Icons.folder_rounded), label: 'nav.documents'.tr),
+                NavigationDestination(icon: const Icon(Icons.receipt_long_rounded), label: 'nav.invoices'.tr),
+                NavigationDestination(icon: const Icon(Icons.notifications_rounded), label: 'nav.alerts'.tr),
+                NavigationDestination(icon: const Icon(Icons.person_rounded), label: 'nav.account'.tr),
               ],
             ),
           ),
@@ -892,7 +902,7 @@ class ShellPage extends StatelessWidget {
 class DashboardPage extends StatelessWidget {
   const DashboardPage({super.key});
 
-  String _money(num value) => '£${value.toStringAsFixed(0)}';
+  String _money(num value) => formatEuro(value);
 
   @override
   Widget build(BuildContext context) {
@@ -1087,7 +1097,7 @@ class PropertyPage extends StatefulWidget {
 class _PropertyPageState extends State<PropertyPage> {
   String invoiceFilter = 'All';
 
-  String _money(num value) => '£${value.toStringAsFixed(0)}';
+  String _money(num value) => formatEuro(value);
 
   bool _isYearMatch(Invoice invoice, String year) {
     return invoice.date.contains(year) || invoice.ref.contains(year);
@@ -1223,7 +1233,7 @@ class _PropertyPageState extends State<PropertyPage> {
           ListView(padding: const EdgeInsets.all(16), children: [
             _KV(label: 'Address', value: property.address),
             _KV(label: 'Property type', value: property.type),
-            _KV(label: 'Current value', value: '£${property.value.toStringAsFixed(0)}'),
+            _KV(label: 'Current value', value: formatEuro(property.value)),
             _KV(label: 'Portfolio status', value: property.status),
             if (property.tenancyStatus != null && property.tenancyStatus!.isNotEmpty)
               _KV(label: 'Tenancy', value: property.tenancyStatus!),
@@ -1508,7 +1518,7 @@ class _PropertyPageState extends State<PropertyPage> {
                         mainAxisAlignment: MainAxisAlignment.center,
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
-                          Text('£${i.amount.toStringAsFixed(0)}'),
+                          Text(formatEuro(i.amount)),
                           Text(
                             i.status,
                             style: TextStyle(color: i.status == 'Paid' ? AppColors.gold : Colors.orange, fontSize: 11),
@@ -2001,7 +2011,7 @@ class _InvoicesPageState extends State<InvoicesPage> {
                       icon: Icons.receipt_long_outlined,
                     ),
                     const SizedBox(height: 8),
-                    Text('Total value £${app.invoices.fold<double>(0, (s, i) => s + i.amount).toStringAsFixed(0)}'),
+                    Text('Total value ${formatEuro(app.invoices.fold<double>(0, (s, i) => s + i.amount))}'),
                     const SizedBox(height: 10),
                     Wrap(
                       spacing: 8,
@@ -2037,7 +2047,7 @@ class _InvoicesPageState extends State<InvoicesPage> {
                               mainAxisSize: MainAxisSize.min,
                               crossAxisAlignment: CrossAxisAlignment.end,
                               children: [
-                                Text('£${i.amount.toStringAsFixed(0)}'),
+                                Text(formatEuro(i.amount)),
                                 Text(
                                   i.status,
                                   style: TextStyle(
@@ -2137,7 +2147,7 @@ class AlertsPage extends StatelessWidget {
           alerts.add((
             icon: Icons.receipt_long_outlined,
             title: 'Invoice pending',
-            subtitle: '${i.supplier} • £${i.amount.toStringAsFixed(0)}',
+            subtitle: '${i.supplier} • ${formatEuro(i.amount)}',
             onTap: () {
               final linkedProperty = property;
               if (linkedProperty != null) {
@@ -2234,30 +2244,49 @@ class AccountPage extends StatelessWidget {
     final auth = Get.find<AuthController>();
     final app = Get.find<AppController>();
     return Scaffold(
-      appBar: AppBar(title: yhgcAppBarTitle('Account')),
+      appBar: AppBar(title: yhgcAppBarTitle('account.title'.tr)),
       body: Obx(
         () => _PageBackdrop(
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
             children: [
-              const _HeroStrip(
-                title: 'Account',
-                subtitle: 'Access mode and connected portfolio',
+              _HeroStrip(
+                title: 'account.title'.tr,
+                subtitle: 'account.subtitle'.tr,
                 icon: Icons.manage_accounts_outlined,
               ),
               const SizedBox(height: 10),
               _PanelCard(
                 child: ListTile(
-                  title: const Text('Client'),
+                  title: Text('account.client'.tr),
                   subtitle: Text(app.companies.isEmpty ? '-' : app.companies.first.name),
                 ),
               ),
               _PanelCard(
                 child: ListTile(
-                  title: const Text('Portfolio scope'),
-                  subtitle: Text('${app.properties.length} properties • ${app.invoices.length} invoices'),
+                  title: Text('account.portfolioScope'.tr),
+                  subtitle: Text('account.scope'.trParams({
+                    'p': '${app.properties.length}',
+                    'i': '${app.invoices.length}',
+                  })),
                 ),
+              ),
+              _PanelCard(
+                child: Obx(() {
+                  final lc = Get.find<LocaleController>();
+                  return ListTile(
+                    leading: const Icon(Icons.translate_rounded),
+                    title: Text('account.language'.tr),
+                    subtitle: Text(lc.isFrench
+                        ? 'account.languageFrench'.tr
+                        : 'account.languageEnglish'.tr),
+                    trailing: TextButton(
+                      onPressed: () => lc.toggle(),
+                      child: Text(lc.isFrench ? 'EN' : 'FR'),
+                    ),
+                  );
+                }),
               ),
               const Spacer(),
               FilledButton(
@@ -2265,7 +2294,7 @@ class AccountPage extends StatelessWidget {
                   await auth.logout();
                   Get.offAll(() => const LoginPage());
                 },
-                child: const Text('Logout'),
+                child: Text('common.logout'.tr),
               ),
               const SizedBox(height: 8),
               OutlinedButton(
@@ -2274,7 +2303,7 @@ class AccountPage extends StatelessWidget {
                   foregroundColor: AppColors.crimson,
                   side: const BorderSide(color: AppColors.crimson),
                 ),
-                child: const Text('Delete Account'),
+                child: Text('account.deleteAccount'.tr),
               ),
             ],
           ),

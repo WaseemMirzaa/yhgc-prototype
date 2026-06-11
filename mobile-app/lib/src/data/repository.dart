@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:yhgc_mobile_app/src/config/app_settings.dart';
 import 'package:yhgc_mobile_app/src/data/client_login_gate.dart';
 import 'package:yhgc_mobile_app/src/data/models.dart';
+import 'package:yhgc_mobile_app/src/i18n/formatters.dart';
 
 abstract class AppRepository {
   /// Live Firestore document updates; null when [appSettings.useLiveFirestore] is false.
@@ -564,7 +565,7 @@ String _safeUrl(String value) {
 
 String _moneyLabel(num? v) {
   if (v == null) return '';
-  return '£${v.toStringAsFixed(0)}';
+  return formatEuro(v);
 }
 
 class MockRepository implements AppRepository {
