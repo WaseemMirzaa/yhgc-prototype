@@ -7,7 +7,7 @@ export interface I18nContextValue {
   lang: Lang
   setLang: (lang: Lang) => void
   toggleLang: () => void
-  /** Look up a key in the active language; falls back to French, then the key. `{name}` placeholders. */
+  /** Look up a key in the active language; falls back to English, then the key. `{name}` placeholders. */
   t: (key: string, params?: TranslateParams) => string
 }
 

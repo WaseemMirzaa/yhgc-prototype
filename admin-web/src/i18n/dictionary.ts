@@ -1,6 +1,6 @@
 /**
- * Admin i18n dictionaries. French is the default; English is available via the toggle.
- * Keys are added screen by screen as the UI is localized; `t()` falls back to French,
+ * Admin i18n dictionaries. English only.
+ * Keys are added screen by screen as the UI is localized; `t()` falls back to English,
  * then to the key itself, so partially-migrated screens never crash.
  *
  * Placeholders use `{name}` and are filled via `t(key, { name: value })`.

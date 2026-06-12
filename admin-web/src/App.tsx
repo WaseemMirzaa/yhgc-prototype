@@ -1100,7 +1100,7 @@ function AdminApp() {
     updateConstructionStage,
   } = useAppStore()
 
-  const { t, lang, setLang } = useI18n()
+  const { t } = useI18n()
 
   useEffect(() => {
     void init()
@@ -1487,21 +1487,6 @@ function AdminApp() {
               </button>
             ))}
           </nav>
-          <div className="mt-4 flex items-center gap-1 rounded-lg border border-yhgc-gold/25 bg-neutral-900/70 p-1 text-xs">
-            <span className="px-2 text-neutral-400">{t("common.language")}</span>
-            {(["fr", "en"] as const).map((code) => (
-              <button
-                key={code}
-                type="button"
-                onClick={() => setLang(code)}
-                className={`flex-1 rounded-md px-2 py-1 font-medium uppercase transition ${
-                  lang === code ? "bg-yhgc-gold text-black" : "text-neutral-300 hover:bg-neutral-800"
-                }`}
-              >
-                {code}
-              </button>
-            ))}
-          </div>
           <button
             type="button"
             onClick={() => {

@@ -1,6 +1,6 @@
 import 'package:get/get.dart';
 
-/// GetX translations. French is the default; English is available via the toggle.
+/// GetX translations. English only.
 /// Use `'key'.tr` (and `'key'.trParams({'x': ...})` for placeholders like `@x`).
 ///
 /// Keys are added screen by screen as the UI is localized. Enum/status labels that
@@ -82,6 +82,7 @@ const Map<String, String> _en = {
   // Bottom navigation
   'nav.home': 'Home',
   'nav.documents': 'Documents',
+  'nav.documentsShort': 'Docs',
   'nav.invoices': 'Invoices',
   'nav.alerts': 'Alerts',
   'nav.account': 'Account',
@@ -181,6 +182,7 @@ const Map<String, String> _fr = {
   // Bottom navigation
   'nav.home': 'Accueil',
   'nav.documents': 'Documents',
+  'nav.documentsShort': 'Docs',
   'nav.invoices': 'Factures',
   'nav.alerts': 'Alertes',
   'nav.account': 'Compte',

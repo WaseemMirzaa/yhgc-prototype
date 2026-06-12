@@ -1,4 +1,5 @@
- import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get/get.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -185,7 +186,7 @@ Widget yhgcAppBarTitle(String title, {double logoHeight = 26}) {
 }
 
 class YhgcApp extends StatelessWidget {
-  const YhgcApp({super.key, this.initialLocale = LocaleController.fr});
+  const YhgcApp({super.key, this.initialLocale = LocaleController.en});
 
   final Locale initialLocale;
 
@@ -948,7 +949,12 @@ class ShellPage extends StatelessWidget {
               indicatorColor: AppColors.crimson.withValues(alpha: 0.3),
               destinations: [
                 NavigationDestination(icon: const Icon(Icons.home_rounded), label: 'nav.home'.tr),
-                NavigationDestination(icon: const Icon(Icons.folder_rounded), label: 'nav.documents'.tr),
+                NavigationDestination(
+                  icon: const Icon(Icons.folder_rounded),
+                  label: defaultTargetPlatform == TargetPlatform.android
+                      ? 'nav.documentsShort'.tr
+                      : 'nav.documents'.tr,
+                ),
                 NavigationDestination(icon: const Icon(Icons.receipt_long_rounded), label: 'nav.invoices'.tr),
                 NavigationDestination(icon: const Icon(Icons.notifications_rounded), label: 'nav.alerts'.tr),
                 NavigationDestination(icon: const Icon(Icons.person_rounded), label: 'nav.account'.tr),
@@ -2309,79 +2315,64 @@ class AccountPage extends StatelessWidget {
       appBar: AppBar(title: yhgcAppBarTitle('account.title'.tr)),
       body: Obx(
         () => _PageBackdrop(
-          child: Padding(
+          child: SingleChildScrollView(
             padding: const EdgeInsets.all(16),
             child: Column(
-            children: [
-              _HeroStrip(
-                title: 'account.title'.tr,
-                subtitle: 'account.subtitle'.tr,
-                icon: Icons.manage_accounts_outlined,
-              ),
-              const SizedBox(height: 10),
-              _PanelCard(
-                child: ListTile(
-                  title: Text('account.client'.tr),
-                  subtitle: Text(app.companies.isEmpty ? '-' : app.companies.first.name),
+              children: [
+                _HeroStrip(
+                  title: 'account.title'.tr,
+                  subtitle: 'account.subtitle'.tr,
+                  icon: Icons.manage_accounts_outlined,
                 ),
-              ),
-              _PanelCard(
-                child: ListTile(
-                  title: Text('account.loginCode'.tr),
-                  subtitle: Text(
-                    auth.loginCode.value.isEmpty ? '-' : auth.loginCode.value,
-                    style: const TextStyle(
-                      fontFamily: 'monospace',
-                      letterSpacing: 0.6,
-                      fontWeight: FontWeight.w600,
+                const SizedBox(height: 10),
+                _PanelCard(
+                  child: ListTile(
+                    title: Text('account.client'.tr),
+                    subtitle: Text(app.companies.isEmpty ? '-' : app.companies.first.name),
+                  ),
+                ),
+                _PanelCard(
+                  child: ListTile(
+                    title: Text('account.loginCode'.tr),
+                    subtitle: Text(
+                      auth.loginCode.value.isEmpty ? '-' : auth.loginCode.value,
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        letterSpacing: 0.6,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ),
-              ),
-              _PanelCard(
-                child: ListTile(
-                  title: Text('account.portfolioScope'.tr),
-                  subtitle: Text('account.scope'.trParams({
-                    'p': '${app.properties.length}',
-                    'i': '${app.invoices.length}',
-                  })),
+                _PanelCard(
+                  child: ListTile(
+                    title: Text('account.portfolioScope'.tr),
+                    subtitle: Text('account.scope'.trParams({
+                      'p': '${app.properties.length}',
+                      'i': '${app.invoices.length}',
+                    })),
+                  ),
                 ),
-              ),
-              _PanelCard(
-                child: Obx(() {
-                  final lc = Get.find<LocaleController>();
-                  return ListTile(
-                    leading: const Icon(Icons.translate_rounded),
-                    title: Text('account.language'.tr),
-                    subtitle: Text(lc.isFrench
-                        ? 'account.languageFrench'.tr
-                        : 'account.languageEnglish'.tr),
-                    trailing: TextButton(
-                      onPressed: () => lc.toggle(),
-                      child: Text(lc.isFrench ? 'EN' : 'FR'),
-                    ),
-                  );
-                }),
-              ),
-              const Spacer(),
-              FilledButton(
-                onPressed: () async {
-                  await auth.logout();
-                  Get.offAll(() => const LoginPage());
-                },
-                child: Text('common.logout'.tr),
-              ),
-              const SizedBox(height: 8),
-              OutlinedButton(
-                onPressed: () => _deleteAccount(context, auth),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.crimson,
-                  side: const BorderSide(color: AppColors.crimson),
+                const SizedBox(height: 24),
+                FilledButton(
+                  onPressed: () async {
+                    await auth.logout();
+                    Get.offAll(() => const LoginPage());
+                  },
+                  child: Text('common.logout'.tr),
                 ),
-                child: Text('account.deleteAccount'.tr),
-              ),
-            ],
-          ),
+                const SizedBox(height: 8),
+                OutlinedButton(
+                  onPressed: () => _deleteAccount(context, auth),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.crimson,
+                    side: const BorderSide(color: AppColors.crimson),
+                  ),
+                  child: Text('account.deleteAccount'.tr),
+                ),
+                const SizedBox(height: 16),
+              ],
+            ),
           ),
         ),
       ),
