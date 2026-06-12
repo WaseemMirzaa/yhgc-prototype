@@ -268,6 +268,103 @@ Future<String> _uniqueLoginCode() async {
   return 'YHG-${DateTime.now().year}-${DateTime.now().millisecondsSinceEpoch % 10000}';
 }
 
+class ClientPasswordResetResult {
+  const ClientPasswordResetResult({
+    required this.success,
+    this.message,
+    this.clientId,
+  });
+
+  final bool success;
+  final String? message;
+  final String? clientId;
+
+  factory ClientPasswordResetResult.denied(String message) =>
+      ClientPasswordResetResult(success: false, message: message);
+}
+
+Future<ClientPasswordResetResult> resetClientPasswordWithVerification({
+  required String loginCode,
+  required String email,
+  required String newPassword,
+}) async {
+  final code = loginCode.trim();
+  final em = email.trim().toLowerCase();
+  if (code.isEmpty) {
+    return ClientPasswordResetResult.denied('Enter your login code.');
+  }
+  if (em.isEmpty || !em.contains('@')) {
+    return ClientPasswordResetResult.denied('Enter a valid registered email.');
+  }
+  if (newPassword.length < 8) {
+    return ClientPasswordResetResult.denied('Password must be at least 8 characters.');
+  }
+
+  if (!appSettings.useLiveFirestore) {
+    if (code == kFallbackDemoLoginCode) {
+      return const ClientPasswordResetResult(success: true, clientId: 'client-1');
+    }
+    return ClientPasswordResetResult.denied('No account found for this login code and email.');
+  }
+
+  try {
+    final clientsSnap = await FirebaseFirestore.instance
+        .collection('clients')
+        .get(const GetOptions(source: Source.server));
+
+    DocumentSnapshot<Map<String, dynamic>>? matched;
+    for (final d in clientsSnap.docs) {
+      final raw = d.data();
+      if ((raw['loginCode'] ?? '').toString().trim() != code) continue;
+      matched = d;
+      break;
+    }
+
+    if (matched == null) {
+      return ClientPasswordResetResult.denied(
+        'No account found for this login code and email.',
+      );
+    }
+
+    final raw = matched.data() ?? <String, dynamic>{};
+    final storedEmail = (raw['email'] ?? '').toString().trim().toLowerCase();
+    if (storedEmail.isEmpty) {
+      return ClientPasswordResetResult.denied(
+        'This account has no email on file. Contact your adviser to reset your password.',
+      );
+    }
+    if (storedEmail != em) {
+      return ClientPasswordResetResult.denied(
+        'Email does not match the account for this login code.',
+      );
+    }
+
+    final st = (raw['status'] ?? 'active').toString();
+    if (st == 'suspended') {
+      return ClientPasswordResetResult.denied(
+        'This account is suspended. Contact your adviser.',
+      );
+    }
+    if (st == 'revoked') {
+      return ClientPasswordResetResult.denied(
+        'This account has been revoked. Contact your adviser.',
+      );
+    }
+    if (!_hasPasswordSet(raw)) {
+      return ClientPasswordResetResult.denied(
+        'No password set yet. Leave the password blank on login to create one.',
+      );
+    }
+
+    await setClientPassword(clientId: matched.id, password: newPassword);
+    return ClientPasswordResetResult(success: true, clientId: matched.id);
+  } catch (_) {
+    return ClientPasswordResetResult.denied(
+      'Could not reset password. Check your connection and try again.',
+    );
+  }
+}
+
 Future<ClientSignupResult> createClientFromMobileSignup({
   required String fullName,
   required String email,

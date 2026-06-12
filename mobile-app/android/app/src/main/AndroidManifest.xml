@@ -1,14 +1,20 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Network -->
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission
+        android:name="android.permission.INTERNET"/>
+    <uses-permission
+        android:name="android.permission.ACCESS_NETWORK_STATE"/>
     <!-- FCM / push notifications -->
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <uses-permission android:name="android.permission.VIBRATE" />
-    <uses-permission android:name="com.google.android.c2dm.permission.RECEIVE" />
+    <uses-permission
+        android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission
+        android:name="android.permission.WAKE_LOCK"/>
+    <uses-permission
+        android:name="android.permission.VIBRATE"/>
+    <uses-permission
+        android:name="com.google.android.c2dm.permission.RECEIVE"/>
     <application
-        android:label="yhgc_mobile_app"
+        android:label="YHGC"
         android:name=".YhgcApplication"
         android:icon="@mipmap/ic_launcher">
         <activity
@@ -25,9 +31,8 @@
                  while the Flutter UI initializes. After that, this theme continues
                  to determine the Window background behind the Flutter UI. -->
             <meta-data
-              android:name="io.flutter.embedding.android.NormalTheme"
-              android:resource="@style/NormalTheme"
-              />
+                android:name="io.flutter.embedding.android.NormalTheme"
+                android:resource="@style/NormalTheme"/>
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
@@ -37,13 +42,16 @@
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data
             android:name="flutterEmbedding"
-            android:value="2" />
+            android:value="2"/>
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
-            android:value="yhgc_alerts" />
+            android:value="yhgc_alerts"/>
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_icon"
-            android:resource="@mipmap/ic_launcher" />
+            android:resource="@drawable/ic_notification"/>
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/notification_accent"/>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and
@@ -52,8 +60,10 @@
          In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
     <queries>
         <intent>
-            <action android:name="android.intent.action.PROCESS_TEXT"/>
-            <data android:mimeType="text/plain"/>
+            <action
+                android:name="android.intent.action.PROCESS_TEXT"/>
+            <data
+                android:mimeType="text/plain"/>
         </intent>
     </queries>
 </manifest>

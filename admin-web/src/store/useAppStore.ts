@@ -213,11 +213,36 @@ function isBlank(value: string | undefined): boolean {
   return !(value ?? "").trim().length
 }
 
-/** Last snapshot already written to the backend, so local edits persist only their own deltas. */
+/** Last snapshot confirmed on the server (or successfully written), for diffing local edits. */
 let writeBaseline: AppSnapshot | null = null
 /** True while a realtime server update is being applied, so we don't echo it back as a write. */
 let applyingRemote = false
+/** In-flight per-record writes — remote snapshots must not wipe optimistic rows mid-save. */
+let writeInFlight = 0
+let persistChain: Promise<void> = Promise.resolve()
 let unsubscribeData: (() => void) | null = null
+
+/** Keep local rows that were added but have not appeared on the server yet. */
+function mergeRemoteWithPendingLocal(
+  remote: AppSnapshot,
+  local: AppSnapshot | null,
+  baseline: AppSnapshot | null,
+): AppSnapshot {
+  if (!local || !baseline) return remote
+  const merged = { ...remote } as unknown as Record<CollectionKey, EntityRow[]>
+  for (const key of COLLECTION_KEYS) {
+    const baseList = baseline[key] as unknown as EntityRow[]
+    const localList = local[key] as unknown as EntityRow[]
+    const remoteList = remote[key] as unknown as EntityRow[]
+    const baseIds = new Set(baseList.map((r) => String(r.id)))
+    const remoteIds = new Set(remoteList.map((r) => String(r.id)))
+    const pendingAdds = localList.filter((r) => !baseIds.has(String(r.id)) && !remoteIds.has(String(r.id)))
+    if (pendingAdds.length > 0) {
+      merged[key] = [...pendingAdds, ...remoteList]
+    }
+  }
+  return stampSnapshot(merged as unknown as AppSnapshot)
+}
 
 // Coalesce a burst of portfolio edits into a single "portfolio updated" push per affected client.
 const pendingPushClients = new Set<string>()
@@ -296,9 +321,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     // 1) Stream every record change from the backend into the store in realtime.
     unsubscribeData = dataService.subscribe(
       (remote) => {
+        const local = get().snapshot
+        const merged = mergeRemoteWithPendingLocal(remote, local, writeBaseline)
         applyingRemote = true
         writeBaseline = remote
-        set({ snapshot: remote, loading: false, error: undefined })
+        set({ snapshot: merged, loading: false, error: undefined })
         applyingRemote = false
       },
       (err) => {
@@ -317,11 +344,26 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (!state.snapshot || state.snapshot === prev.snapshot) return
       const base = writeBaseline ?? prev.snapshot
       const next = state.snapshot
-      writeBaseline = next
       if (!base) return
-      void writeSnapshotDiff(base, next).catch((err) => {
-        set({ actionNotice: { kind: "error", message: humanizePersistError(err) } })
-      })
+
+      writeInFlight++
+      const job = persistChain
+        .then(() => writeSnapshotDiff(base, next))
+        .then(() => {
+          writeBaseline = next
+        })
+        .catch((err) => {
+          applyingRemote = true
+          set({
+            snapshot: base,
+            actionNotice: { kind: "error", message: humanizePersistError(err) },
+          })
+          applyingRemote = false
+        })
+        .finally(() => {
+          writeInFlight = Math.max(0, writeInFlight - 1)
+        })
+      persistChain = job.catch(() => {})
     })
   },
   persist: async () => {
@@ -338,11 +380,19 @@ export const useAppStore = create<AppState>((set, get) => ({
       return
     }
     set({ persisting: true })
-    await flushPush()
-    set({
-      persisting: false,
-      actionNotice: { kind: "success", message: "All changes were saved." },
-    })
+    try {
+      await persistChain
+      await flushPush()
+      set({
+        persisting: false,
+        actionNotice: { kind: "success", message: "All changes were saved." },
+      })
+    } catch (err) {
+      set({
+        persisting: false,
+        actionNotice: { kind: "error", message: humanizePersistError(err) },
+      })
+    }
   },
   addClient: ({ fullName, email }) => {
     const current = get().snapshot

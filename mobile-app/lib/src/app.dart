@@ -335,6 +335,39 @@ class _AppBootstrapPageState extends State<AppBootstrapPage> {
   Widget build(BuildContext context) => const SplashPage();
 }
 
+/// Scrollable auth shell that keeps forms usable when the keyboard is open.
+class _AuthScrollBody extends StatelessWidget {
+  const _AuthScrollBody({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Color(0xFFF8F6F2), Color(0xFFEEF1F5)],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+        ),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+          return SingleChildScrollView(
+            padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + bottomInset),
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight - bottomInset),
+              child: child,
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
   @override
@@ -358,20 +391,12 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       appBar: AppBar(title: yhgcAppBarTitle('YHGC Portfolio', logoHeight: 28)),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFFF8F6F2), Color(0xFFEEF1F5)],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
+      body: _AuthScrollBody(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
               _PanelCard(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 8),
@@ -457,7 +482,6 @@ class _LoginPageState extends State<LoginPage> {
                 ),
               ),
             ],
-          ),
         ),
       ),
     );
@@ -540,25 +564,17 @@ class _SignUpPageState extends State<SignUpPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       appBar: AppBar(title: yhgcAppBarTitle('Create account', logoHeight: 24)),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFFF8F6F2), Color(0xFFEEF1F5)],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
-        child: Obx(() {
-          if (!mobileConfig.ready.value) {
-            return const Center(child: CircularProgressIndicator(color: AppColors.crimson));
-          }
-          if (!mobileConfig.allowMobileSignup) {
-            return const SizedBox.shrink();
-          }
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Column(
+      body: Obx(() {
+        if (!mobileConfig.ready.value) {
+          return const Center(child: CircularProgressIndicator(color: AppColors.crimson));
+        }
+        if (!mobileConfig.allowMobileSignup) {
+          return const SizedBox.shrink();
+        }
+        return _AuthScrollBody(
+          child: Column(
               children: [
                 const _HeroStrip(
                   title: 'Create your account',
@@ -685,10 +701,9 @@ class _SignUpPageState extends State<SignUpPage> {
                   ),
                 ),
               ],
-            ),
-          );
-        }),
-      ),
+          ),
+        );
+      }),
     );
   }
 }
@@ -707,51 +722,106 @@ class ForgotPasswordPage extends StatefulWidget {
 }
 
 class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
+  final loginCode = TextEditingController();
   final email = TextEditingController();
+  final password = TextEditingController();
+  final confirmPassword = TextEditingController();
+  final auth = Get.find<AuthController>();
+  var saving = false;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       appBar: AppBar(title: yhgcAppBarTitle('Forgot Password')),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFFF8F6F2), Color(0xFFEEF1F5)],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              const _HeroStrip(
-                title: 'Password reset',
-                subtitle: 'We will send a reset link to your email',
-                icon: Icons.mark_email_read_outlined,
-              ),
-              const SizedBox(height: 12),
-              _PanelCard(
-                child: Column(
-                  children: [
-                    TextField(controller: email, decoration: const InputDecoration(labelText: 'Registered email')),
-                    const SizedBox(height: 12),
-                    FilledButton(
-                      onPressed: () {
-                        if (email.text.trim().isEmpty) {
-                          Get.snackbar('Missing email', 'Please enter your registered email.');
-                          return;
-                        }
-                        Get.snackbar('Reset sent', 'Reset link sent to ${email.text.trim()}');
-                        Get.back();
-                      },
-                      child: const Text('Send reset link'),
+      body: _AuthScrollBody(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const _HeroStrip(
+              title: 'Password reset',
+              subtitle: 'Verify your login code and email, then choose a new password',
+              icon: Icons.lock_reset_rounded,
+            ),
+            const SizedBox(height: 12),
+            _PanelCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextField(
+                    controller: loginCode,
+                    decoration: const InputDecoration(
+                      labelText: 'LOGIN CODE',
+                      hintText: 'Your issued client code',
                     ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: email,
+                    keyboardType: TextInputType.emailAddress,
+                    decoration: const InputDecoration(labelText: 'REGISTERED EMAIL'),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: password,
+                    obscureText: true,
+                    decoration: const InputDecoration(labelText: 'NEW PASSWORD'),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: confirmPassword,
+                    obscureText: true,
+                    decoration: const InputDecoration(labelText: 'CONFIRM NEW PASSWORD'),
+                  ),
+                  const SizedBox(height: 12),
+                  if (saving)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 10),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2.2, color: AppColors.crimson),
+                          ),
+                          SizedBox(width: 10),
+                          Text('Updating your password...'),
+                        ],
+                      ),
+                    ),
+                  FilledButton(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.crimson,
+                      minimumSize: const Size.fromHeight(48),
+                    ),
+                    onPressed: saving
+                        ? null
+                        : () async {
+                            setState(() => saving = true);
+                            final err = await auth.tryResetPassword(
+                              loginCode: loginCode.text,
+                              email: email.text,
+                              password: password.text,
+                              confirmPassword: confirmPassword.text,
+                            );
+                            if (err == null) {
+                              Get.snackbar(
+                                'Password updated',
+                                'You can now log in with your new password.',
+                              );
+                              Get.back();
+                            } else {
+                              Get.snackbar('Cannot reset password', err);
+                            }
+                            if (mounted) setState(() => saving = false);
+                          },
+                    child: const Text('RESET PASSWORD'),
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -765,19 +835,12 @@ class _FirstLoginPageState extends State<FirstLoginPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: true,
       appBar: AppBar(title: yhgcAppBarTitle('First Login')),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFFF8F6F2), Color(0xFFEEF1F5)],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
+      body: _AuthScrollBody(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
               const _HeroStrip(
                 title: 'Set your password',
                 subtitle: 'Secure your private portfolio access',
@@ -831,8 +894,7 @@ class _FirstLoginPageState extends State<FirstLoginPage> {
                 ),
               ),
             ],
-          ),
-      ),
+        ),
       ),
     );
   }
@@ -2261,6 +2323,19 @@ class AccountPage extends StatelessWidget {
                 child: ListTile(
                   title: Text('account.client'.tr),
                   subtitle: Text(app.companies.isEmpty ? '-' : app.companies.first.name),
+                ),
+              ),
+              _PanelCard(
+                child: ListTile(
+                  title: Text('account.loginCode'.tr),
+                  subtitle: Text(
+                    auth.loginCode.value.isEmpty ? '-' : auth.loginCode.value,
+                    style: const TextStyle(
+                      fontFamily: 'monospace',
+                      letterSpacing: 0.6,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ),
               ),
               _PanelCard(

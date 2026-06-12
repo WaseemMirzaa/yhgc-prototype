@@ -3,12 +3,15 @@ import { addDoc, collection, getFirestore, serverTimestamp } from "firebase/fire
 import { activeBackendMode, appSettings } from "../config/settings"
 import type {
   AppSnapshot,
+  Client,
+  Company,
   ConstructionProject,
   ConstructionStage,
   FinanceRecord,
   IncomeRow,
   InsuranceRecord,
   Invoice,
+  Property,
 } from "../types/models"
 
 function initFirestoreDb() {
@@ -85,12 +88,36 @@ function rowById<T extends { id: string }>(rows: T[], id: string): T | undefined
   return rows.find((r) => r.id === id)
 }
 
-/** Clients whose construction / loan / income / invoices / insurance (or weekly logs) changed between two snapshots. */
+/** Clients affected by any portfolio entity change between two snapshots. */
 export function collectClientsTouchedByPortfolioDiff(prev: AppSnapshot, next: AppSnapshot): Set<string> {
   const clients = new Set<string>()
   const propToClient = propertyClientMap(next)
   const projToPropPrev = projectPropertyMap(prev)
   const projToPropNext = projectPropertyMap(next)
+
+  const touchClient = (id: string) => {
+    const a = rowById<Client>(prev.clients, id)
+    const b = rowById<Client>(next.clients, id)
+    const pick = b ?? a
+    if (pick && rowSig(a) !== rowSig(b)) clients.add(pick.id)
+  }
+  for (const id of diffIds(prev.clients, next.clients)) touchClient(id)
+
+  const touchCompany = (id: string) => {
+    const a = rowById<Company>(prev.companies, id)
+    const b = rowById<Company>(next.companies, id)
+    const pick = b ?? a
+    if (pick && rowSig(a) !== rowSig(b)) clients.add(pick.clientId)
+  }
+  for (const id of diffIds(prev.companies, next.companies)) touchCompany(id)
+
+  const touchProperty = (id: string) => {
+    const a = rowById<Property>(prev.properties, id)
+    const b = rowById<Property>(next.properties, id)
+    const pick = b ?? a
+    if (pick && rowSig(a) !== rowSig(b)) clients.add(pick.clientId)
+  }
+  for (const id of diffIds(prev.properties, next.properties)) touchProperty(id)
 
   const touchInvoices = (id: string) => {
     const a = rowById<Invoice>(prev.invoices, id)

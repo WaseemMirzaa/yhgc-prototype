@@ -14,6 +14,7 @@ class AuthController extends GetxController {
   final loggedIn = false.obs;
   final firstLogin = true.obs;
   final sessionReady = false.obs;
+  final loginCode = ''.obs;
   /// Incremented when Firebase portfolio client scope changes so [AppController] can re-pull.
   final portfolioScopeEpoch = 0.obs;
 
@@ -53,6 +54,8 @@ class AuthController extends GetxController {
       cid = null;
     }
 
+    loginCode.value = prefs.getString(_kLoginCode) ?? '';
+
     _pushRepoScope(loggedIn.value ? cid : null);
     await FcmService.instance.startForClient(loggedIn.value ? cid : null);
     sessionReady.value = true;
@@ -82,7 +85,9 @@ class AuthController extends GetxController {
     if (!ok) return 'Invalid password.';
     loggedIn.value = true;
     await prefs.setString(_kClientId, gate.clientId!);
-    await prefs.setString(_kLoginCode, c.trim());
+    final code = c.trim();
+    await prefs.setString(_kLoginCode, code);
+    loginCode.value = code;
     _pushRepoScope(gate.clientId);
     await FcmService.instance.startForClient(gate.clientId);
     _notifyPortfolioScopeChanged();
@@ -139,10 +144,38 @@ class AuthController extends GetxController {
     await prefs.setString(_kClientPassword, password);
     await prefs.setString(_kClientId, clientId);
     await prefs.setString(_kLoginCode, loginCode);
+    this.loginCode.value = loginCode;
     _pushRepoScope(clientId);
     await FcmService.instance.startForClient(clientId);
     _notifyPortfolioScopeChanged();
     await _saveSession();
+    return null;
+  }
+
+  /// Returns null on success after verifying login code + registered email.
+  Future<String?> tryResetPassword({
+    required String loginCode,
+    required String email,
+    required String password,
+    required String confirmPassword,
+  }) async {
+    if (password != confirmPassword) return 'Passwords do not match.';
+    final result = await resetClientPasswordWithVerification(
+      loginCode: loginCode,
+      email: email,
+      newPassword: password,
+    );
+    if (!result.success) return result.message ?? 'Could not reset password.';
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kClientPassword, password);
+    if (result.clientId != null && result.clientId!.isNotEmpty) {
+      await prefs.setString(_kClientId, result.clientId!);
+    }
+    final code = loginCode.trim();
+    await prefs.setString(_kLoginCode, code);
+    this.loginCode.value = code;
+    firstLogin.value = false;
+    await prefs.setBool(_kFirstLogin, false);
     return null;
   }
 
@@ -171,6 +204,7 @@ class AuthController extends GetxController {
     }
     await prefs.setString(_kClientId, gate.clientId!);
     await prefs.setString(_kLoginCode, code);
+    loginCode.value = code;
     _pushRepoScope(gate.clientId);
     await FcmService.instance.startForClient(gate.clientId);
     _notifyPortfolioScopeChanged();
@@ -191,6 +225,7 @@ class AuthController extends GetxController {
     final cid = prefs.getString(_kClientId);
     await prefs.remove(_kClientId);
     await prefs.remove(_kLoginCode);
+    loginCode.value = '';
     await FcmService.instance.stopForClient(cid);
     _pushRepoScope(null);
     _notifyPortfolioScopeChanged();
@@ -216,6 +251,7 @@ class AuthController extends GetxController {
     final cid = prefs.getString(_kClientId);
     await prefs.remove(_kClientId);
     await prefs.remove(_kLoginCode);
+    loginCode.value = '';
     await FcmService.instance.stopForClient(cid);
     _pushRepoScope(null);
     _notifyPortfolioScopeChanged();

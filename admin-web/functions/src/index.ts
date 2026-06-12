@@ -121,6 +121,10 @@ export const sendFcmToUsers = onCall(async (request) => {
     token: t,
     notification: { title, body },
     data: dataStrings,
+    android: {
+      priority: "high" as const,
+      notification: { channelId: "yhgc_alerts" },
+    },
   }));
 
   const result = await messaging.sendEach(messages);
@@ -164,6 +168,10 @@ export const onFcmOutboxCreated = onDocumentCreated("fcmOutbox/{id}", async (eve
     token: t,
     notification: { title, body },
     data: dataStrings,
+    android: {
+      priority: "high" as const,
+      notification: { channelId: "yhgc_alerts" },
+    },
   }));
   const result = await messaging.sendEach(messages);
   await snap.ref.update({

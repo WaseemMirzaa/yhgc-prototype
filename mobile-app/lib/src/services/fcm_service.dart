@@ -81,7 +81,7 @@ class FcmService {
     _activeClientId = clientId;
 
     final messaging = FirebaseMessaging.instance;
-    await messaging.requestPermission(alert: true, badge: true, sound: true);
+    await _ensureNotificationPermission(messaging);
     final token = await messaging.getToken();
     if (token != null && token.isNotEmpty) {
       await _saveToken(clientId, token);
@@ -145,6 +145,19 @@ class FcmService {
     final app = Get.find<AppController>();
     if (app.repository.portfolioSnapshotStream != null) {
       unawaited(app.refreshFirebasePortfolio());
+    }
+  }
+
+  Future<void> _ensureNotificationPermission(FirebaseMessaging messaging) async {
+    final settings = await messaging.requestPermission(alert: true, badge: true, sound: true);
+    if (defaultTargetPlatform != TargetPlatform.android) return;
+    if (settings.authorizationStatus == AuthorizationStatus.denied) {
+      Get.snackbar(
+        'Notifications off',
+        'Enable notifications in Android Settings to receive portfolio alerts.',
+        snackPosition: SnackPosition.TOP,
+        duration: const Duration(seconds: 5),
+      );
     }
   }
 
