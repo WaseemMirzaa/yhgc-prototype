@@ -443,7 +443,7 @@ class _LoginPageState extends State<LoginPage> {
                           Get.to(() => const FirstLoginPage());
                           return;
                         }
-                        final err = await auth.tryLogin(trimmedCode, pass.text);
+                        final err = await auth.tryLogin(trimmedCode, pass.text.trim());
                         if (err == null) {
                           Get.offAll(() => const ShellPage());
                           FcmService.instance.applyPendingNavigation();
@@ -2313,8 +2313,13 @@ class AccountPage extends StatelessWidget {
     final app = Get.find<AppController>();
     return Scaffold(
       appBar: AppBar(title: yhgcAppBarTitle('account.title'.tr)),
-      body: Obx(
-        () => _PageBackdrop(
+      body: Obx(() {
+        final clientName = app.companies.isEmpty ? '-' : app.companies.first.name;
+        final loginCode = auth.loginCode.value.isEmpty ? '-' : auth.loginCode.value;
+        final propertyCount = app.properties.length;
+        final invoiceCount = app.invoices.length;
+
+        return _PageBackdrop(
           child: LayoutBuilder(
             builder: (context, constraints) {
               return SingleChildScrollView(
@@ -2334,14 +2339,14 @@ class AccountPage extends StatelessWidget {
                       _PanelCard(
                         child: ListTile(
                           title: Text('account.client'.tr),
-                          subtitle: Text(app.companies.isEmpty ? '-' : app.companies.first.name),
+                          subtitle: Text(clientName),
                         ),
                       ),
                       _PanelCard(
                         child: ListTile(
                           title: Text('account.loginCode'.tr),
                           subtitle: Text(
-                            auth.loginCode.value.isEmpty ? '-' : auth.loginCode.value,
+                            loginCode,
                             style: const TextStyle(
                               fontFamily: 'monospace',
                               letterSpacing: 0.6,
@@ -2354,8 +2359,8 @@ class AccountPage extends StatelessWidget {
                         child: ListTile(
                           title: Text('account.portfolioScope'.tr),
                           subtitle: Text('account.scope'.trParams({
-                            'p': '${app.properties.length}',
-                            'i': '${app.invoices.length}',
+                            'p': '$propertyCount',
+                            'i': '$invoiceCount',
                           })),
                         ),
                       ),
@@ -2383,8 +2388,8 @@ class AccountPage extends StatelessWidget {
               );
             },
           ),
-        ),
-      ),
+        );
+      }),
     );
   }
 }

@@ -43,18 +43,23 @@ class AuthController extends GetxController {
   Future<void> _loadSession() async {
     final prefs = await SharedPreferences.getInstance();
     loggedIn.value = prefs.getBool(_kLoggedIn) ?? false;
-    firstLogin.value = prefs.getBool(_kFirstLogin) ?? true;
     var cid = prefs.getString(_kClientId);
+    final storedLoginCode = prefs.getString(_kLoginCode) ?? '';
+    final hasLocalSetup =
+        storedLoginCode.isNotEmpty || (cid != null && cid.isNotEmpty);
+    final storedFirstLogin = prefs.getBool(_kFirstLogin);
+    // Prefer server-backed returning users: a saved login code means first-login is done.
+    firstLogin.value = hasLocalSetup ? false : (storedFirstLogin ?? true);
 
     if (appSettings.useLiveFirestore && loggedIn.value && (cid == null || cid.isEmpty)) {
       loggedIn.value = false;
       await prefs.setBool(_kLoggedIn, false);
       await prefs.remove(_kClientId);
-      await prefs.remove(_kLoginCode);
+      // Keep login code so returning users are not forced back through first-login UX.
       cid = null;
     }
 
-    loginCode.value = prefs.getString(_kLoginCode) ?? '';
+    loginCode.value = storedLoginCode;
 
     _pushRepoScope(loggedIn.value ? cid : null);
     await FcmService.instance.startForClient(loggedIn.value ? cid : null);
@@ -63,29 +68,35 @@ class AuthController extends GetxController {
 
   /// Returns null on success, or an error message.
   Future<String?> tryLogin(String c, String p) async {
-    if (firstLogin.value) {
-      return 'Use first login with your invite code, then set a password.';
+    final code = c.trim();
+    final pwd = p.trim();
+    if (code.isEmpty) {
+      return 'Enter your login code.';
     }
-    if (p.isEmpty) {
+    if (pwd.isEmpty) {
       return 'Enter your password, or leave it empty to set up access with your invite code.';
     }
-    final gate = await Get.find<AppRepository>().checkClientLoginAccess(c.trim());
+    final gate = await Get.find<AppRepository>().checkClientLoginAccess(code);
     if (!gate.allowed) return gate.message ?? 'Access denied.';
     if (gate.clientId == null || gate.clientId!.isEmpty) {
       return 'Client record is incomplete. Contact your adviser.';
     }
+    if (appSettings.useLiveFirestore) {
+      if (gate.hasPassword != true) {
+        return 'Password not set yet. Leave password blank on login to create one.';
+      }
+    } else if (firstLogin.value) {
+      return 'Use first login with your invite code, then set a password.';
+    }
     final prefs = await SharedPreferences.getInstance();
     final saved = prefs.getString(_kClientPassword);
-    if (appSettings.useLiveFirestore && gate.hasPassword != true) {
-      return 'Password not set yet. Leave password blank to create one.';
-    }
     final ok = appSettings.useLiveFirestore
-        ? await verifyClientPassword(clientId: gate.clientId!, password: p)
-        : (p == password || (saved != null && p == saved));
+        ? await verifyClientPassword(clientId: gate.clientId!, password: pwd)
+        : (pwd == password || (saved != null && pwd == saved));
     if (!ok) return 'Invalid password.';
+    firstLogin.value = false;
     loggedIn.value = true;
     await prefs.setString(_kClientId, gate.clientId!);
-    final code = c.trim();
     await prefs.setString(_kLoginCode, code);
     loginCode.value = code;
     _pushRepoScope(gate.clientId);
@@ -159,15 +170,17 @@ class AuthController extends GetxController {
     required String password,
     required String confirmPassword,
   }) async {
-    if (password != confirmPassword) return 'Passwords do not match.';
+    final pwd = password.trim();
+    final confirm = confirmPassword.trim();
+    if (pwd != confirm) return 'Passwords do not match.';
     final result = await resetClientPasswordWithVerification(
-      loginCode: loginCode,
-      email: email,
-      newPassword: password,
+      loginCode: loginCode.trim(),
+      email: email.trim(),
+      newPassword: pwd,
     );
     if (!result.success) return result.message ?? 'Could not reset password.';
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_kClientPassword, password);
+    await prefs.setString(_kClientPassword, pwd);
     if (result.clientId != null && result.clientId!.isNotEmpty) {
       await prefs.setString(_kClientId, result.clientId!);
     }
@@ -181,7 +194,8 @@ class AuthController extends GetxController {
 
   /// Returns null on success.
   Future<String?> trySetPassword(String p) async {
-    if (p.length < 8) return 'Password must be at least 8 characters.';
+    final pwd = p.trim();
+    if (pwd.length < 8) return 'Password must be at least 8 characters.';
     final gate =
         await Get.find<AppRepository>().checkClientLoginAccess(_pendingFirstLoginCode);
     if (!gate.allowed) {
@@ -198,9 +212,9 @@ class AuthController extends GetxController {
     final code = _pendingFirstLoginCode;
     _pendingFirstLoginCode = '';
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_kClientPassword, p);
+    await prefs.setString(_kClientPassword, pwd);
     if (appSettings.useLiveFirestore) {
-      await setClientPassword(clientId: gate.clientId!, password: p);
+      await setClientPassword(clientId: gate.clientId!, password: pwd);
     }
     await prefs.setString(_kClientId, gate.clientId!);
     await prefs.setString(_kLoginCode, code);
