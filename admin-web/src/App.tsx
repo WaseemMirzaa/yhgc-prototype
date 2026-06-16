@@ -1460,7 +1460,7 @@ function AdminApp() {
       ) : null}
       <div className="grid min-h-screen grid-cols-12 lg:items-start">
         <aside className="col-span-12 border-r border-yhgc-gold/20 bg-gradient-to-b from-[#0a0a0a] via-[#111111] to-[#171717] px-4 py-6 text-white lg:sticky lg:top-0 lg:z-30 lg:col-span-3 lg:h-screen lg:overflow-y-auto xl:col-span-2">
-          <div className="mb-6 rounded-lg border border-yhgc-gold/25 bg-neutral-900/70 p-3">
+          <div className="mb-6 rounded-lg border border-yhgc-gold/25 p-3">
             <img src={BRAND_LOGO_SRC} alt="" className="h-10 w-auto max-w-full object-contain object-left opacity-95" />
             <p className="mt-2 text-xs uppercase tracking-[0.2em] text-yhgc-gold">{t("shell.admin")}</p>
             <h1 className="mt-1 text-lg font-semibold leading-tight">{t("shell.operations")}</h1>
