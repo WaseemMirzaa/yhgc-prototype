@@ -965,17 +965,22 @@ class DashboardPage extends StatelessWidget {
           }
 
           final totalPortfolioValue = app.properties.fold<double>(0, (sum, p) => sum + p.value);
-          final grossMonthlyNet = app.properties.fold<double>(0, (sum, p) => sum + p.net);
-          // Repeating (monthly) expenses come off the monthly net income.
-          final monthlyExpenses =
-              app.expenses.where((e) => e.isRepeating).fold<double>(0, (sum, e) => sum + e.amount);
-          final monthlyNetIncome = grossMonthlyNet - monthlyExpenses;
-          // Total outflow = supplier invoices + all recorded expenses (one-off + repeating).
-          final allExpenses = app.expenses.fold<double>(0, (sum, e) => sum + e.amount);
-          final expenditure =
-              app.invoices.fold<double>(0, (sum, invoice) => sum + invoice.amount) + allExpenses;
+
+          // Income (actuals): rent actually received + logged income rows.
+          final rentReceived =
+              app.rentReceipts.where((r) => r.isReceived).fold<double>(0, (sum, r) => sum + r.amount);
+          final incomeRowIncome = app.incomeRows.fold<double>(0, (sum, r) => sum + r.incomeAmount);
+          final totalIncome = rentReceived + incomeRowIncome;
+
+          // Expenditure: supplier invoices + expenses (one-off + repeating) + logged operating costs.
+          final invoicesTotal = app.invoices.fold<double>(0, (sum, i) => sum + i.amount);
+          final expensesTotal = app.expenses.fold<double>(0, (sum, e) => sum + e.amount);
+          final incomeRowCosts = app.incomeRows.fold<double>(0, (sum, r) => sum + r.costAmount);
+          final expenditure = invoicesTotal + expensesTotal + incomeRowCosts;
+
+          // Net income = what came in minus what went out. Rent received raises it; expenses lower it.
+          final netIncome = totalIncome - expenditure;
           final activeAssets = app.properties.where((p) => p.status != 'Vacant').length;
-          final monthChange = appSettings.useLiveFirestore ? monthlyNetIncome : null;
 
           return ListView(
             padding: const EdgeInsets.all(16),
@@ -1005,17 +1010,16 @@ class DashboardPage extends StatelessWidget {
                     style: const TextStyle(color: AppColors.gold, fontSize: 34, fontWeight: FontWeight.w800),
                   ),
                   Text(
-                    monthChange == null
-                        ? 'Monthly change currently unavailable'
-                        : '▲ ${monthChange >= 0 ? '+' : ''}${_money(monthChange)} this month',
-                    style: TextStyle(color: monthChange == null || monthChange >= 0 ? AppColors.gold : Colors.orangeAccent),
+                    '${netIncome >= 0 ? '▲ +' : '▼ '}${_money(netIncome)} net income to date',
+                    style: TextStyle(color: netIncome >= 0 ? AppColors.gold : Colors.orangeAccent),
                   ),
                   const SizedBox(height: 12),
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
                     children: [
-                      SizedBox(width: 150, child: _MetricMiniCard(label: 'Net Income', value: _money(monthlyNetIncome))),
+                      SizedBox(width: 150, child: _MetricMiniCard(label: 'Net Income', value: _money(netIncome))),
+                      SizedBox(width: 150, child: _MetricMiniCard(label: 'Income', value: _money(totalIncome))),
                       SizedBox(width: 150, child: _MetricMiniCard(label: 'Expenditure', value: _money(expenditure))),
                       SizedBox(width: 110, child: _MetricMiniCard(label: 'Assets', value: activeAssets.toString())),
                     ],
