@@ -22,9 +22,13 @@ abstract class AppRepository {
   Future<bool> updateInvoiceStatus(String invoiceId, {required bool paid});
   Future<List<FinanceRecord>> financeRecords();
   Future<List<IncomeRow>> incomeRows();
+  Future<List<Expense>> expenses();
+  Future<List<RentReceipt>> rentReceipts();
   Future<List<InsuranceRecord>> insuranceRecords();
   Future<List<ConstructionProject>> constructionProjects();
   Future<List<ConstructionStage>> constructionStages();
+  /// Display name of the signed-in client (empty when unknown).
+  Future<String> clientDisplayName();
   Future<String?> deleteClientAccount(String? clientId);
   Future<String> createAccountantShareLink({
     required String scopeType,
@@ -44,10 +48,13 @@ class PortfolioSnapshot {
     required this.files,
     required this.financeRecords,
     required this.incomeRows,
+    required this.expenses,
+    required this.rentReceipts,
     required this.insuranceRecords,
     required this.constructionProjects,
     required this.constructionStages,
     required this.notifications,
+    this.clientFullName = '',
   });
 
   final List<Company> companies;
@@ -57,10 +64,14 @@ class PortfolioSnapshot {
   final List<PortfolioFile> files;
   final List<FinanceRecord> financeRecords;
   final List<IncomeRow> incomeRows;
+  final List<Expense> expenses;
+  final List<RentReceipt> rentReceipts;
   final List<InsuranceRecord> insuranceRecords;
   final List<ConstructionProject> constructionProjects;
   final List<ConstructionStage> constructionStages;
   final List<PortfolioNotification> notifications;
+  /// Display name of the signed-in client (from the scoped `clients` record).
+  final String clientFullName;
 }
 
 Future<PortfolioSnapshot> buildPortfolioSnapshotFromMap(
@@ -77,10 +88,13 @@ Future<PortfolioSnapshot> buildPortfolioSnapshotFromMap(
       files: await fallback.portfolioFiles(),
       financeRecords: await fallback.financeRecords(),
       incomeRows: await fallback.incomeRows(),
+      expenses: await fallback.expenses(),
+      rentReceipts: await fallback.rentReceipts(),
       insuranceRecords: await fallback.insuranceRecords(),
       constructionProjects: await fallback.constructionProjects(),
       constructionStages: await fallback.constructionStages(),
       notifications: const [],
+      clientFullName: await fallback.clientDisplayName(),
     );
   }
   Map<String, dynamic> effective = Map<String, dynamic>.from(data);
@@ -98,10 +112,13 @@ Future<PortfolioSnapshot> buildPortfolioSnapshotFromMap(
     files: files,
     financeRecords: _fbParseFinance(effective),
     incomeRows: _fbParseIncome(effective),
+    expenses: _fbParseExpenses(effective),
+    rentReceipts: _fbParseRentReceipts(effective),
     insuranceRecords: _fbParseInsurance(effective),
     constructionProjects: projects,
     constructionStages: stages,
     notifications: _fbNotifications(effective),
+    clientFullName: _fbClientFullName(effective),
   );
 }
 
@@ -244,6 +261,10 @@ List<Property> _fbProperties(
             incomeToDateLabel: incomeToDate != null ? _moneyLabel(incomeToDate) : null,
             costToDateLabel: costToDate != null ? _moneyLabel(costToDate) : null,
             netPositionLabel: netPosition != null ? _moneyLabel(netPosition) : null,
+            rentAmount: (item['rentAmount'] as num?)?.toDouble(),
+            rentFrequency: item['rentFrequency']?.toString(),
+            rentDueDay: (item['rentDueDay'] as num?)?.toInt(),
+            rentStartDate: item['rentStartDate']?.toString(),
           );
         },
       )
@@ -406,9 +427,46 @@ List<IncomeRow> _fbParseIncome(Map<String, dynamic> data) {
           period: (item['period'] ?? '').toString(),
           incomeAmount: ((item['incomeAmount'] as num?) ?? 0).toDouble(),
           costAmount: ((item['costAmount'] as num?) ?? 0).toDouble(),
+          frequency: item['frequency']?.toString(),
         ),
       )
       .toList();
+}
+
+List<Expense> _fbParseExpenses(Map<String, dynamic> data) {
+  return _snapshotList(data, 'expenses')
+      .map(
+        (item) => Expense(
+          id: (item['id'] ?? '').toString(),
+          propertyId: (item['propertyId'] ?? '').toString(),
+          description: (item['description'] ?? '').toString(),
+          category: item['category']?.toString(),
+          amount: ((item['amount'] as num?) ?? 0).toDouble(),
+          date: (item['date'] ?? '').toString(),
+          recurrence: (item['recurrence'] ?? 'one_off').toString(),
+        ),
+      )
+      .toList();
+}
+
+List<RentReceipt> _fbParseRentReceipts(Map<String, dynamic> data) {
+  return _snapshotList(data, 'rentReceipts')
+      .map(
+        (item) => RentReceipt(
+          id: (item['id'] ?? '').toString(),
+          propertyId: (item['propertyId'] ?? '').toString(),
+          dueDate: (item['dueDate'] ?? '').toString(),
+          amount: ((item['amount'] as num?) ?? 0).toDouble(),
+          receivedDate: item['receivedDate']?.toString(),
+        ),
+      )
+      .toList();
+}
+
+String _fbClientFullName(Map<String, dynamic> data) {
+  final clients = _snapshotList(data, 'clients');
+  if (clients.isEmpty) return '';
+  return (clients.first['fullName'] ?? '').toString();
 }
 
 List<InsuranceRecord> _fbParseInsurance(Map<String, dynamic> data) {
@@ -505,9 +563,20 @@ Map<String, dynamic> _scopedFirestoreDataForClient(
       .where((m) => propertyIds.contains((m['propertyId'] ?? '').toString()))
       .toList();
 
+  final expenses = _snapshotList(data, 'expenses')
+      .where((m) => propertyIds.contains((m['propertyId'] ?? '').toString()))
+      .toList();
+
+  final rentReceipts = _snapshotList(data, 'rentReceipts')
+      .where((m) => propertyIds.contains((m['propertyId'] ?? '').toString()))
+      .toList();
+
   final notifications = _snapshotList(data, 'notifications').where(ownClient).toList();
 
-  final clients = _snapshotList(data, 'clients').where(ownClient).toList();
+  // Client records key on `id` (they have no `clientId` field).
+  final clients = _snapshotList(data, 'clients')
+      .where((m) => (m['id'] ?? '').toString() == scopeClientId)
+      .toList();
 
   data['companies'] = companies;
   data['properties'] = properties;
@@ -517,6 +586,8 @@ Map<String, dynamic> _scopedFirestoreDataForClient(
   data['assets'] = assets;
   data['financeRecords'] = financeRecords;
   data['incomeRows'] = incomeRows;
+  data['expenses'] = expenses;
+  data['rentReceipts'] = rentReceipts;
   data['insuranceRecords'] = insuranceRecords;
   data['notifications'] = notifications;
   data['clients'] = clients;
@@ -753,9 +824,56 @@ class MockRepository implements AppRepository {
       incomeToDateLabel: '£412000',
       costToDateLabel: '£98500',
       netPositionLabel: '£313500',
+      rentAmount: 6100,
+      rentFrequency: 'monthly',
+      rentDueDay: 1,
+      rentStartDate: '2026-04-01',
     );
     return const [p1, p2];
   }
+
+  @override
+  Future<List<Expense>> expenses() async => const [
+        Expense(
+          id: 'exp-2-clean',
+          propertyId: 'property-2',
+          description: 'Communal cleaning (monthly contract)',
+          category: 'Maintenance',
+          amount: 180,
+          date: '2026-04-01',
+          recurrence: 'repeating',
+        ),
+        Expense(
+          id: 'exp-2-toilet',
+          propertyId: 'property-2',
+          description: 'Replace toilet seat — Flat 3',
+          category: 'Repairs',
+          amount: 45,
+          date: '2026-05-12',
+          recurrence: 'one_off',
+        ),
+      ];
+
+  @override
+  Future<List<RentReceipt>> rentReceipts() async => const [
+        RentReceipt(
+          id: 'rent-2-apr',
+          propertyId: 'property-2',
+          dueDate: '2026-04-01',
+          amount: 6100,
+          receivedDate: '2026-04-01',
+        ),
+        RentReceipt(
+          id: 'rent-2-may',
+          propertyId: 'property-2',
+          dueDate: '2026-05-01',
+          amount: 6100,
+          receivedDate: '2026-05-06',
+        ),
+      ];
+
+  @override
+  Future<String> clientDisplayName() async => 'Aarav Ventures Ltd';
 
   @override
   Future<List<PortfolioDocument>> documents() async => const [
@@ -1023,6 +1141,8 @@ class FirebaseRepository implements AppRepository {
     'constructionStages',
     'financeRecords',
     'incomeRows',
+    'expenses',
+    'rentReceipts',
     'invoices',
     'insuranceRecords',
     'assets',
@@ -1171,6 +1291,15 @@ class FirebaseRepository implements AppRepository {
 
   @override
   Future<List<IncomeRow>> incomeRows() async => (await _materializedPortfolio()).incomeRows;
+
+  @override
+  Future<List<Expense>> expenses() async => (await _materializedPortfolio()).expenses;
+
+  @override
+  Future<List<RentReceipt>> rentReceipts() async => (await _materializedPortfolio()).rentReceipts;
+
+  @override
+  Future<String> clientDisplayName() async => (await _materializedPortfolio()).clientFullName;
 
   @override
   Future<List<InsuranceRecord>> insuranceRecords() async =>

@@ -19,10 +19,13 @@ class AppController extends GetxController {
   final files = <PortfolioFile>[].obs;
   final financeRecords = <FinanceRecord>[].obs;
   final incomeRows = <IncomeRow>[].obs;
+  final expenses = <Expense>[].obs;
+  final rentReceipts = <RentReceipt>[].obs;
   final insuranceRecords = <InsuranceRecord>[].obs;
   final constructionProjects = <ConstructionProject>[].obs;
   final constructionStages = <ConstructionStage>[].obs;
   final notifications = <PortfolioNotification>[].obs;
+  final clientName = ''.obs;
   final unread = 0.obs;
   final loading = false.obs;
 
@@ -82,10 +85,13 @@ class AppController extends GetxController {
     files.assignAll(s.files);
     financeRecords.assignAll(s.financeRecords);
     incomeRows.assignAll(s.incomeRows);
+    expenses.assignAll(s.expenses);
+    rentReceipts.assignAll(s.rentReceipts);
     insuranceRecords.assignAll(s.insuranceRecords);
     constructionProjects.assignAll(s.constructionProjects);
     constructionStages.assignAll(s.constructionStages);
     notifications.assignAll(s.notifications);
+    clientName.value = s.clientFullName;
     loading.value = false;
     _syncUnread();
   }
@@ -101,10 +107,13 @@ class AppController extends GetxController {
       files.assignAll(await repository.portfolioFiles());
       financeRecords.assignAll(await repository.financeRecords());
       incomeRows.assignAll(await repository.incomeRows());
+      expenses.assignAll(await repository.expenses());
+      rentReceipts.assignAll(await repository.rentReceipts());
       insuranceRecords.assignAll(await repository.insuranceRecords());
       constructionProjects.assignAll(await repository.constructionProjects());
       constructionStages.assignAll(await repository.constructionStages());
       notifications.clear();
+      clientName.value = await repository.clientDisplayName();
     } finally {
       loading.value = false;
       _syncUnread();
@@ -166,10 +175,13 @@ class AppController extends GetxController {
       files.clear();
       financeRecords.clear();
       incomeRows.clear();
+      expenses.clear();
+      rentReceipts.clear();
       insuranceRecords.clear();
       constructionProjects.clear();
       constructionStages.clear();
       notifications.clear();
+      clientName.value = '';
       unread.value = 0;
       tab.value = 0;
       return null;
