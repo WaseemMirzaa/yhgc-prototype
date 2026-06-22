@@ -1,5 +1,5 @@
 import { initializeApp, getApps } from "firebase/app"
-import { collection, doc, getDoc, getDocs, getFirestore, setDoc, writeBatch } from "firebase/firestore"
+import { collection, doc, type DocumentReference, getDoc, getDocs, getFirestore, setDoc, writeBatch } from "firebase/firestore"
 import { appSettings, activeBackendMode } from "../config/settings"
 import { seedSnapshot } from "../data/seed"
 import type { AppSnapshot } from "../types/models"
@@ -162,9 +162,12 @@ class FirebaseDataService implements DataService {
 
   async saveSnapshot(snapshot: AppSnapshot): Promise<void> {
     const clean = stripUndefinedForFirestore(snapshot)
-    // Keep legacy doc as backup in option A.
-    await setDoc(this.snapshotPath, clean, { merge: false })
-    await this.saveToCollections(clean)
+    // The legacy single-doc backup and the per-collection sync are independent writes,
+    // so run them together instead of one after the other.
+    await Promise.all([
+      setDoc(this.snapshotPath, clean, { merge: false }),
+      this.saveToCollections(clean),
+    ])
   }
 
   private async loadFromCollections(): Promise<Partial<AppSnapshot> | null> {
@@ -183,28 +186,47 @@ class FirebaseDataService implements DataService {
   }
 
   private async saveToCollections(snapshot: AppSnapshot): Promise<void> {
-    const batch = writeBatch(this.db)
-    for (const key of this.collectionKeys) {
-      const colRef = collection(this.db, key)
-      const existing = await getDocs(colRef)
+    // Read every collection in parallel. Previously these reads ran sequentially —
+    // one network round-trip per collection — which made every save slow.
+    const existingPerKey = await Promise.all(
+      this.collectionKeys.map((key) => getDocs(collection(this.db, key))),
+    )
+
+    type WriteOp =
+      | { type: "delete"; ref: DocumentReference }
+      | { type: "set"; ref: DocumentReference; data: Record<string, unknown> }
+    const ops: WriteOp[] = []
+
+    this.collectionKeys.forEach((key, idx) => {
+      const existing = existingPerKey[idx]!
       const nextRows = snapshot[key] as unknown as Array<{ id: string } & Record<string, unknown>>
       const nextIds = new Set(nextRows.map((row) => String(row.id)))
 
       // Remove records deleted in UI.
       for (const docSnap of existing.docs) {
-        if (!nextIds.has(docSnap.id)) {
-          batch.delete(docSnap.ref)
-        }
+        if (!nextIds.has(docSnap.id)) ops.push({ type: "delete", ref: docSnap.ref })
       }
 
       // Upsert current records by id.
       for (const row of nextRows) {
         const id = String(row.id)
         const { id: _ignore, ...payload } = row
-        batch.set(doc(this.db, key, id), stripUndefinedForFirestore(payload), { merge: false })
+        ops.push({ type: "set", ref: doc(this.db, key, id), data: stripUndefinedForFirestore(payload) })
       }
+    })
+
+    // A Firestore writeBatch allows at most 500 operations, so commit in chunks (in parallel).
+    const CHUNK = 450
+    const commits: Promise<void>[] = []
+    for (let i = 0; i < ops.length; i += CHUNK) {
+      const batch = writeBatch(this.db)
+      for (const op of ops.slice(i, i + CHUNK)) {
+        if (op.type === "delete") batch.delete(op.ref)
+        else batch.set(op.ref, op.data, { merge: false })
+      }
+      commits.push(batch.commit())
     }
-    await batch.commit()
+    await Promise.all(commits)
   }
 }
 
