@@ -1263,7 +1263,7 @@ class _PropertyPageState extends State<PropertyPage> {
     final propertyLevelConstructionFiles =
         _filesFor(app, property.id, ownerType: 'property', tagEquals: 'construction');
     return DefaultTabController(
-      length: 6,
+      length: 7,
       child: Scaffold(
         appBar: AppBar(
           title: yhgcAppBarTitle(property.displayTitle, logoHeight: 22),
@@ -1272,6 +1272,7 @@ class _PropertyPageState extends State<PropertyPage> {
             Tab(text: 'Construction'),
             Tab(text: 'Loan'),
             Tab(text: 'Income'),
+            Tab(text: 'Expenses'),
             Tab(text: 'Invoices'),
             Tab(text: 'Insurance'),
           ]),
@@ -1610,6 +1611,31 @@ class _PropertyPageState extends State<PropertyPage> {
                 ),
               ),
             ],
+          ]),
+          ListView(padding: const EdgeInsets.all(16), children: [
+            _KV(label: 'Repeating (monthly)', value: '-${_money(monthlyRepeatingExpenses)}'),
+            _KV(
+              label: 'One-off total',
+              value: '-${_money(expensesForProp.where((e) => !e.isRepeating).fold<double>(0, (s, e) => s + e.amount))}',
+            ),
+            const SizedBox(height: 8),
+            if (expensesForProp.isEmpty)
+              const Card(child: ListTile(title: Text('No expenses recorded yet')))
+            else
+              ...expensesForProp.map(
+                (e) => Card(
+                  child: ListTile(
+                    leading: Icon(e.isRepeating ? Icons.repeat : Icons.bolt_outlined, color: AppColors.crimson),
+                    title: Text(e.description),
+                    subtitle: Text(
+                      '${e.date}'
+                      '${e.category != null && e.category!.isNotEmpty ? ' · ${e.category}' : ''}'
+                      ' · ${e.isRepeating ? 'Repeating (monthly)' : 'One-off'}',
+                    ),
+                    trailing: Text('-${_money(e.amount)}', style: const TextStyle(fontWeight: FontWeight.w600)),
+                  ),
+                ),
+              ),
           ]),
           ListView(padding: const EdgeInsets.all(16), children: [
             _KV(label: 'Invoice count', value: '${inv.length}'),
