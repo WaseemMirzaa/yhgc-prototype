@@ -10,12 +10,14 @@ import type {
   Company,
   ConstructionProject,
   ConstructionStage,
+  Expense,
   FinanceRecord,
   IncomeRow,
   InsuranceRecord,
   Invoice,
   NotificationLog,
   Property,
+  RentReceipt,
 } from "../types/models"
 
 export type ActionNotice = { kind: "success" | "error"; message: string } | null
@@ -48,6 +50,8 @@ function removePropertyCascade(snap: AppSnapshot, propertyId: string): AppSnapsh
     constructionStages: snap.constructionStages.filter((st) => !projectIds.includes(st.projectId)),
     financeRecords: snap.financeRecords.filter((f) => f.propertyId !== propertyId),
     incomeRows: snap.incomeRows.filter((r) => r.propertyId !== propertyId),
+    rentReceipts: snap.rentReceipts.filter((r) => r.propertyId !== propertyId),
+    expenses: snap.expenses.filter((e) => e.propertyId !== propertyId),
     insuranceRecords: snap.insuranceRecords.filter((i) => i.propertyId !== propertyId),
     invoices: snap.invoices.filter((inv) => inv.propertyId !== propertyId),
     assets,
@@ -110,7 +114,9 @@ interface AppState {
   clearActionNotice: () => void
   setActionNotice: (notice: ActionNotice) => void
   addClient: (payload: Pick<Client, "fullName" | "email">) => void
-  addCompany: (payload: Pick<Company, "clientId" | "companyNumber" | "name">) => void
+  addCompany: (
+    payload: Pick<Company, "clientId" | "companyNumber" | "name"> & Partial<Pick<Company, "registeredAddress">>,
+  ) => void
   addProperty: (
     payload: Pick<Property, "clientId" | "companyId" | "title" | "address" | "propertyType" | "status">,
   ) => void
@@ -138,6 +144,12 @@ interface AppState {
   updateFinanceRecord: (id: string, patch: Partial<Omit<FinanceRecord, "id" | "propertyId">>) => void
   addIncomeRow: (payload: Omit<IncomeRow, "id">) => void
   updateIncomeRow: (id: string, patch: Partial<Omit<IncomeRow, "id" | "propertyId">>) => void
+  addExpense: (payload: Omit<Expense, "id">) => void
+  updateExpense: (id: string, patch: Partial<Omit<Expense, "id" | "propertyId">>) => void
+  deleteExpense: (id: string) => void
+  markRentReceived: (payload: Omit<RentReceipt, "id">) => void
+  updateRentReceipt: (id: string, patch: Partial<Omit<RentReceipt, "id" | "propertyId">>) => void
+  deleteRentReceipt: (id: string) => void
   addInsuranceRecord: (payload: Omit<InsuranceRecord, "id">) => string | undefined
   updateInsuranceRecord: (id: string, patch: Partial<Omit<InsuranceRecord, "id" | "propertyId">>) => void
   updateInvoice: (id: string, patch: Partial<Omit<Invoice, "id" | "propertyId">>) => void
@@ -290,18 +302,20 @@ export const useAppStore = create<AppState>((set, get) => ({
       actionNotice: { kind: "success", message: "Client added." },
     })
   },
-  addCompany: ({ clientId, companyNumber, name }) => {
+  addCompany: ({ clientId, companyNumber, name, registeredAddress }) => {
     const current = get().snapshot
     if (!current) return
     if (isBlank(clientId) || isBlank(companyNumber) || isBlank(name)) {
       set({ actionNotice: { kind: "error", message: "Choose a client, then enter the company name and Companies House number." } })
       return
     }
+    const trimmedAddress = (registeredAddress ?? "").trim()
     const next: Company = {
       id: uuid(),
       clientId,
       companyNumber,
       name,
+      ...(trimmedAddress ? { registeredAddress: trimmedAddress } : {}),
       lastUpdatedAt: now(),
     }
     set({
@@ -450,7 +464,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const project = current.constructionProjects.find((p) => p.id === projectId)
     if (!project) {
       set({
-        actionNotice: { kind: "error", message: "This build programme no longer exists, so the week could not be logged." },
+        actionNotice: { kind: "error", message: "This build schedule no longer exists, so the week could not be logged." },
       })
       return undefined
     }
@@ -490,7 +504,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!current) return undefined
     if (isBlank(propertyId)) {
       set({
-        actionNotice: { kind: "error", message: "Open a property first, then add a build programme from there." },
+        actionNotice: { kind: "error", message: "Open a property first, then add a build schedule from there." },
       })
       return undefined
     }
@@ -613,6 +627,84 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     const incomeRows = current.incomeRows.map((row) => (row.id === id ? { ...row, ...patch } : row))
     set({ snapshot: { ...current, incomeRows, updatedAt: now() } })
+  },
+  addExpense: (payload) => {
+    const current = get().snapshot
+    if (!current) return
+    if (isBlank(payload.propertyId)) {
+      set({
+        actionNotice: { kind: "error", message: "Open a property first, then add the expense from that property." },
+      })
+      return
+    }
+    if (isBlank(payload.description)) {
+      set({ actionNotice: { kind: "error", message: "Enter a short description for the expense." } })
+      return
+    }
+    if (!Number.isFinite(payload.amount) || payload.amount <= 0) {
+      set({ actionNotice: { kind: "error", message: "Enter an expense amount greater than zero." } })
+      return
+    }
+    if (isBlank(payload.date)) {
+      set({ actionNotice: { kind: "error", message: "Choose the date this expense applies from." } })
+      return
+    }
+    const next: Expense = { id: uuid(), ...payload }
+    set({
+      snapshot: { ...current, expenses: [next, ...current.expenses], updatedAt: now() },
+      actionNotice: { kind: "success", message: "Expense added." },
+    })
+  },
+  updateExpense: (id, patch) => {
+    const current = get().snapshot
+    if (!current) return
+    const expenses = current.expenses.map((item) => (item.id === id ? { ...item, ...patch } : item))
+    set({
+      snapshot: { ...current, expenses, updatedAt: now() },
+      actionNotice: { kind: "success", message: "Expense updated." },
+    })
+  },
+  deleteExpense: (id) => {
+    const current = get().snapshot
+    if (!current) return
+    set({
+      snapshot: { ...current, expenses: current.expenses.filter((e) => e.id !== id), updatedAt: now() },
+      actionNotice: { kind: "success", message: "Expense removed." },
+    })
+  },
+  markRentReceived: (payload) => {
+    const current = get().snapshot
+    if (!current) return
+    if (isBlank(payload.propertyId) || isBlank(payload.dueDate)) {
+      set({ actionNotice: { kind: "error", message: "A rent due date is required to record a payment." } })
+      return
+    }
+    if (!Number.isFinite(payload.amount) || payload.amount <= 0) {
+      set({ actionNotice: { kind: "error", message: "Enter the rent amount received (greater than zero)." } })
+      return
+    }
+    const next: RentReceipt = { id: uuid(), ...payload }
+    set({
+      snapshot: { ...current, rentReceipts: [next, ...current.rentReceipts], updatedAt: now() },
+      actionNotice: { kind: "success", message: "Rent recorded against this property." },
+    })
+  },
+  updateRentReceipt: (id, patch) => {
+    const current = get().snapshot
+    if (!current) return
+    const rentReceipts = current.rentReceipts.map((item) => (item.id === id ? { ...item, ...patch } : item))
+    set({
+      snapshot: { ...current, rentReceipts, updatedAt: now() },
+      actionNotice: { kind: "success", message: "Rent payment updated." },
+    })
+  },
+  deleteRentReceipt: (id) => {
+    const current = get().snapshot
+    if (!current) return
+    set({
+      snapshot: { ...current, rentReceipts: current.rentReceipts.filter((r) => r.id !== id), updatedAt: now() },
+      actionNotice: { kind: "success", message: "Rent payment removed." },
+    })
   },
   addInsuranceRecord: (payload) => {
     const current = get().snapshot
@@ -770,7 +862,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         ),
         updatedAt: now(),
       },
-      actionNotice: { kind: "success", message: "Construction programme removed." },
+      actionNotice: { kind: "success", message: "Construction schedule removed." },
     })
   },
   deleteConstructionStage: (stageId) => {

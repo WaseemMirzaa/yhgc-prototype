@@ -16,6 +16,24 @@ export type AttachmentTag =
   | "invoice"
   | "construction"
 
+/** How often rent falls due for a property. */
+export type RentFrequency = "monthly" | "weekly" | "fortnightly"
+/** Cadence options offered when logging an income row. */
+export type IncomeFrequency = "monthly" | "weekly" | "fortnightly" | "one_off"
+/** Whether an expense is a single cost or recurs every month. */
+export type ExpenseRecurrence = "one_off" | "repeating"
+
+/** Selectable property types (admin "Add / edit property"). */
+export const PROPERTY_TYPE_OPTIONS = [
+  "Serviced Accommodation",
+  "Buy to let",
+  "Residential",
+  "Commercial",
+  "Semi Commercial",
+  "Hotel",
+  "HMO",
+] as const
+
 export interface Client {
   id: Id
   fullName: string
@@ -56,6 +74,11 @@ export interface Property {
   incomeToDate?: number
   costToDate?: number
   netPosition?: number
+  // Rent schedule (admin-managed) — drives automatic rent-received tracking.
+  rentAmount?: number
+  rentFrequency?: RentFrequency
+  rentDueDay?: number // day of month (1–31) rent is due, for monthly schedules
+  rentStartDate?: ISODate // first due date / cadence anchor (used for weekly/fortnightly)
 }
 
 export interface ConstructionProject {
@@ -95,6 +118,27 @@ export interface IncomeRow {
   period: string
   incomeAmount: number
   costAmount: number
+  frequency?: IncomeFrequency
+}
+
+/** A confirmed (or due) rent payment for one scheduled occurrence. */
+export interface RentReceipt {
+  id: Id
+  propertyId: Id
+  dueDate: ISODate // when rent was scheduled to arrive
+  amount: number
+  receivedDate?: ISODate // when it actually arrived; later than dueDate ⇒ late
+}
+
+/** An ongoing or one-off operating cost for a property (e.g. communal clean, repair). */
+export interface Expense {
+  id: Id
+  propertyId: Id
+  description: string
+  category?: string
+  amount: number
+  date: ISODate // date incurred (or first charge date for repeating)
+  recurrence: ExpenseRecurrence // "one_off" | "repeating" (monthly)
 }
 
 export interface Invoice {
@@ -164,6 +208,8 @@ export interface AppSnapshot {
   constructionStages: ConstructionStage[]
   financeRecords: FinanceRecord[]
   incomeRows: IncomeRow[]
+  rentReceipts: RentReceipt[]
+  expenses: Expense[]
   invoices: Invoice[]
   insuranceRecords: InsuranceRecord[]
   assets: Asset[]
