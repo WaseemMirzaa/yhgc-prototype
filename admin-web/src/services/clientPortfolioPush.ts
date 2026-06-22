@@ -5,10 +5,12 @@ import type {
   AppSnapshot,
   ConstructionProject,
   ConstructionStage,
+  Expense,
   FinanceRecord,
   IncomeRow,
   InsuranceRecord,
   Invoice,
+  RentReceipt,
 } from "../types/models"
 
 let persistBaseline: AppSnapshot | null = null
@@ -124,6 +126,24 @@ export function collectClientsTouchedByPortfolioDiff(prev: AppSnapshot, next: Ap
     if (rowSig(a) !== rowSig(b)) addClientForPropertyId(pick.propertyId, propToClient, clients)
   }
   for (const id of diffIds(prev.incomeRows, next.incomeRows)) touchIncome(id)
+
+  const touchExpense = (id: string) => {
+    const a = rowById<Expense>(prev.expenses, id)
+    const b = rowById<Expense>(next.expenses, id)
+    const pick = b ?? a
+    if (!pick) return
+    if (rowSig(a) !== rowSig(b)) addClientForPropertyId(pick.propertyId, propToClient, clients)
+  }
+  for (const id of diffIds(prev.expenses, next.expenses)) touchExpense(id)
+
+  const touchRentReceipt = (id: string) => {
+    const a = rowById<RentReceipt>(prev.rentReceipts, id)
+    const b = rowById<RentReceipt>(next.rentReceipts, id)
+    const pick = b ?? a
+    if (!pick) return
+    if (rowSig(a) !== rowSig(b)) addClientForPropertyId(pick.propertyId, propToClient, clients)
+  }
+  for (const id of diffIds(prev.rentReceipts, next.rentReceipts)) touchRentReceipt(id)
 
   const touchInsurance = (id: string) => {
     const a = rowById<InsuranceRecord>(prev.insuranceRecords, id)
