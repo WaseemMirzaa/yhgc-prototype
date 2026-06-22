@@ -635,7 +635,14 @@ String _safeUrl(String value) {
 
 String _moneyLabel(num? v) {
   if (v == null) return '';
-  return '£${v.toStringAsFixed(0)}';
+  final negative = v < 0;
+  final digits = v.abs().round().toString();
+  final b = StringBuffer();
+  for (var i = 0; i < digits.length; i++) {
+    if (i > 0 && (digits.length - i) % 3 == 0) b.write(',');
+    b.write(digits[i]);
+  }
+  return '${negative ? '-' : ''}£$b';
 }
 
 class MockRepository implements AppRepository {
