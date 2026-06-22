@@ -1281,7 +1281,7 @@ class _PropertyPageState extends State<PropertyPage> {
           ListView(padding: const EdgeInsets.all(16), children: [
             _KV(label: 'Address', value: property.address),
             _KV(label: 'Property type', value: property.type),
-            _KV(label: 'Current value', value: '£${property.value.toStringAsFixed(0)}'),
+            _KV(label: 'Current value', value: formatGbp(property.value)),
             _KV(label: 'Portfolio status', value: property.status),
             if (property.tenancyStatus != null && property.tenancyStatus!.isNotEmpty)
               _KV(label: 'Tenancy', value: property.tenancyStatus!),
@@ -1652,7 +1652,7 @@ class _PropertyPageState extends State<PropertyPage> {
                         mainAxisAlignment: MainAxisAlignment.center,
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
-                          Text('£${i.amount.toStringAsFixed(0)}'),
+                          Text(formatGbp(i.amount)),
                           Text(
                             i.status,
                             style: TextStyle(color: i.status == 'Paid' ? AppColors.gold : Colors.orange, fontSize: 11),
@@ -2145,7 +2145,7 @@ class _InvoicesPageState extends State<InvoicesPage> {
                       icon: Icons.receipt_long_outlined,
                     ),
                     const SizedBox(height: 8),
-                    Text('Total value £${app.invoices.fold<double>(0, (s, i) => s + i.amount).toStringAsFixed(0)}'),
+                    Text('Total value ${formatGbp(app.invoices.fold<double>(0, (s, i) => s + i.amount))}'),
                     const SizedBox(height: 10),
                     Wrap(
                       spacing: 8,
@@ -2181,7 +2181,7 @@ class _InvoicesPageState extends State<InvoicesPage> {
                               mainAxisSize: MainAxisSize.min,
                               crossAxisAlignment: CrossAxisAlignment.end,
                               children: [
-                                Text('£${i.amount.toStringAsFixed(0)}'),
+                                Text(formatGbp(i.amount)),
                                 Text(
                                   i.status,
                                   style: TextStyle(
@@ -2281,7 +2281,7 @@ class AlertsPage extends StatelessWidget {
           alerts.add((
             icon: Icons.receipt_long_outlined,
             title: 'Invoice pending',
-            subtitle: '${i.supplier} • £${i.amount.toStringAsFixed(0)}',
+            subtitle: '${i.supplier} • ${formatGbp(i.amount)}',
             onTap: () {
               final linkedProperty = property;
               if (linkedProperty != null) {
