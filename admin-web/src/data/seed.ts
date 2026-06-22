@@ -71,6 +71,10 @@ export const seedSnapshot: AppSnapshot = {
       incomeToDate: 412000,
       costToDate: 98500,
       netPosition: 313500,
+      rentAmount: 6100,
+      rentFrequency: "monthly",
+      rentDueDay: 1,
+      rentStartDate: "2026-04-01",
     },
     {
       id: "property-3",
@@ -269,6 +273,42 @@ export const seedSnapshot: AppSnapshot = {
       period: "2026-03",
       incomeAmount: 13100,
       costAmount: 8200,
+    },
+  ],
+  rentReceipts: [
+    {
+      id: "rent-2-apr",
+      propertyId: "property-2",
+      dueDate: "2026-04-01",
+      amount: 6100,
+      receivedDate: "2026-04-01",
+    },
+    {
+      id: "rent-2-may",
+      propertyId: "property-2",
+      dueDate: "2026-05-01",
+      amount: 6100,
+      receivedDate: "2026-05-06",
+    },
+  ],
+  expenses: [
+    {
+      id: "exp-2-clean",
+      propertyId: "property-2",
+      description: "Communal cleaning (monthly contract)",
+      category: "Maintenance",
+      amount: 180,
+      date: "2026-04-01",
+      recurrence: "repeating",
+    },
+    {
+      id: "exp-2-toilet",
+      propertyId: "property-2",
+      description: "Replace toilet seat — Flat 3",
+      category: "Repairs",
+      amount: 45,
+      date: "2026-05-12",
+      recurrence: "one_off",
     },
   ],
   invoices: [

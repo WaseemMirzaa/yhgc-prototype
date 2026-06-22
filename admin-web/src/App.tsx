@@ -16,14 +16,20 @@ import type {
   Company,
   ConstructionProject,
   ConstructionStage,
+  Expense,
+  ExpenseRecurrence,
   FinanceRecord,
+  IncomeFrequency,
   IncomeRow,
   InsuranceRecord,
   Invoice,
   InvoiceStatus,
   Property,
   PropertyStatus,
+  RentFrequency,
+  RentReceipt,
 } from "./types/models"
+import { PROPERTY_TYPE_OPTIONS } from "./types/models"
 
 const sections = [
   "dashboard",
@@ -54,7 +60,7 @@ async function themedConfirm(message: string): Promise<boolean> {
 const AUTH_SESSION_KEY = "yhgc-admin-auth-session"
 const BRAND_LOGO_SRC = "/yhgc-logo.png"
 
-const PROPERTY_EDITOR_TABS = ["construction", "finance", "income", "invoices", "insurance"] as const
+const PROPERTY_EDITOR_TABS = ["construction", "finance", "income", "expenses", "invoices", "insurance"] as const
 type PropertyEditorTab = (typeof PROPERTY_EDITOR_TABS)[number]
 
 function isPropertyEditorTab(value: string): value is PropertyEditorTab {
@@ -88,10 +94,11 @@ const PROPERTY_TAB_NAV: { tab: PropertyEditorTab; label: string; description: st
   {
     tab: "construction",
     label: "Construction",
-    description: "Build programme, weekly stages, and construction photos linked to this property.",
+    description: "Build schedule, weekly stages, and construction photos linked to this property.",
   },
   { tab: "finance", label: "Loan", description: "Mortgage, bridging, or other borrowing — amount and monthly payment." },
-  { tab: "income", label: "Income", description: "Rental income and operating costs by period." },
+  { tab: "income", label: "Income", description: "Rent schedule, rent received, and rental income by period." },
+  { tab: "expenses", label: "Expenses", description: "Ongoing and one-off running costs — repeating costs are deducted from net income automatically." },
   { tab: "invoices", label: "Invoices", description: "Supplier invoices, references, amounts, and linked PDFs." },
   { tab: "insurance", label: "Insurance", description: "Policies, insurers, and cover dates for this property." },
 ]
@@ -809,10 +816,10 @@ function PropertyEditForm({
         </label>
         <label className="text-sm">
           <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-neutral-500">Property type</span>
-          <input
+          <PropertyTypeSelect
             value={propertyType}
-            onChange={(e) => {
-              setPropertyType(e.target.value)
+            onChange={(v) => {
+              setPropertyType(v)
               setFormError(null)
             }}
             className={fieldWithInvalid(shellInput, !!formError && !propertyType.trim())}
@@ -2683,6 +2690,7 @@ function AdminApp() {
                   const clientId = String(fd.get("clientId") ?? "")
                   const name = String(fd.get("name") ?? "").trim()
                   const companyNumber = String(fd.get("companyNumber") ?? "").trim()
+                  const registeredAddress = String(fd.get("registeredAddress") ?? "").trim()
                   if (!clientId) {
                     setAddCompanyFormError("Select which client this company belongs to.")
                     return
@@ -2696,7 +2704,7 @@ function AdminApp() {
                     return
                   }
                   setAddCompanyFormError(null)
-                  addCompany({ clientId, name, companyNumber })
+                  addCompany({ clientId, name, companyNumber, registeredAddress })
                   void persist()
                   setAddCompanyOpen(false)
                 }}
@@ -2745,6 +2753,17 @@ function AdminApp() {
                     onChange={() => setAddCompanyFormError(null)}
                     className="w-full rounded-md border border-neutral-300 px-3 py-2"
                   />
+                </label>
+                <label className="mt-3 block text-sm">
+                  <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-neutral-500">Registered address</span>
+                  <textarea
+                    name="registeredAddress"
+                    rows={2}
+                    onChange={() => setAddCompanyFormError(null)}
+                    placeholder="e.g. 10 Bishopsgate, London EC2N 4AY"
+                    className="w-full rounded-md border border-neutral-300 px-3 py-2"
+                  />
+                  <span className="mt-1 block text-xs text-neutral-500">Optional — the company’s registered office address.</span>
                 </label>
                 <button
                   type="submit"
@@ -3383,11 +3402,10 @@ function PropertyFormFields({
       </label>
       <label className="block text-sm">
         <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-neutral-500">Property type</span>
-        <input
+        <PropertyTypeSelect
           value={propertyType}
-          onChange={(e) => onChange({ title, address, propertyType: e.target.value, status })}
+          onChange={(v) => onChange({ title, address, propertyType: v, status })}
           className="w-full rounded-md border border-neutral-300 px-3 py-2"
-          placeholder="Property type"
         />
       </label>
       <label className="block text-sm">
@@ -3404,6 +3422,37 @@ function PropertyFormFields({
         </select>
       </label>
     </div>
+  )
+}
+
+/**
+ * Dropdown of standard property types. If the property already has a value that is
+ * not in the standard list (e.g. legacy / live data like "Industrial"), it is kept
+ * as a selectable option so editing never silently drops it.
+ */
+function PropertyTypeSelect({
+  value,
+  onChange,
+  className,
+}: {
+  value: string
+  onChange: (next: string) => void
+  className: string
+}) {
+  const isStandard = (PROPERTY_TYPE_OPTIONS as readonly string[]).includes(value)
+  const hasCustom = value.trim().length > 0 && !isStandard
+  return (
+    <select value={value} onChange={(e) => onChange(e.target.value)} className={className}>
+      <option value="" disabled>
+        Select property type
+      </option>
+      {PROPERTY_TYPE_OPTIONS.map((opt) => (
+        <option key={opt} value={opt}>
+          {opt}
+        </option>
+      ))}
+      {hasCustom ? <option value={value}>{value} (existing)</option> : null}
+    </select>
   )
 }
 
@@ -4194,7 +4243,7 @@ function PropertyRecordCountsSummary({ property, snapshot }: { property: Propert
   }).length
 
   const cards: { label: string; value: string; hint?: string }[] = [
-    { label: "Construction programmes", value: String(projects.length) },
+    { label: "Construction schedules", value: String(projects.length) },
     { label: "Weekly stages logged", value: String(stages.length) },
     { label: "Loan records", value: String(snapshot.financeRecords.filter((f) => f.propertyId === property.id).length) },
     { label: "Income rows", value: String(snapshot.incomeRows.filter((r) => r.propertyId === property.id).length) },
@@ -5071,6 +5120,17 @@ function InsurancePolicyNewForm({
   )
 }
 
+const INCOME_FREQUENCY_OPTIONS: { value: IncomeFrequency; label: string }[] = [
+  { value: "monthly", label: "Monthly" },
+  { value: "weekly", label: "Weekly" },
+  { value: "fortnightly", label: "Fortnightly" },
+  { value: "one_off", label: "One-off / specific date" },
+]
+
+function incomeFrequencyLabel(value: IncomeFrequency | undefined): string {
+  return INCOME_FREQUENCY_OPTIONS.find((o) => o.value === value)?.label ?? "Monthly"
+}
+
 function IncomeRowForm({
   row,
   onSubmit,
@@ -5081,15 +5141,17 @@ function IncomeRowForm({
   submitLabel?: string
 }) {
   const [period, setPeriod] = useState("")
+  const [frequency, setFrequency] = useState<IncomeFrequency>("monthly")
   const [incomeAmount, setIncomeAmount] = useState("")
   const [costAmount, setCostAmount] = useState("")
   const [formError, setFormError] = useState<string | null>(null)
 
   useEffect(() => {
     setPeriod(row.period)
+    setFrequency(row.frequency ?? "monthly")
     setIncomeAmount(String(row.incomeAmount))
     setCostAmount(String(row.costAmount))
-  }, [row.id, row.period, row.incomeAmount, row.costAmount])
+  }, [row.id, row.period, row.frequency, row.incomeAmount, row.costAmount])
 
   const submit = (event: FormEvent) => {
     event.preventDefault()
@@ -5112,7 +5174,7 @@ function IncomeRowForm({
       setFormError("Income and costs must each be a non-zero amount (not £0).")
       return
     }
-    onSubmit({ period: period.trim(), incomeAmount: inc, costAmount: cost })
+    onSubmit({ period: period.trim(), frequency, incomeAmount: inc, costAmount: cost })
   }
 
   return (
@@ -5122,7 +5184,7 @@ function IncomeRowForm({
           {formError}
         </p>
       ) : null}
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2">
         <label className="text-sm">
           <span className={adminLabel}>Period</span>
           <input
@@ -5134,6 +5196,23 @@ function IncomeRowForm({
             className={adminFieldInput}
             type="month"
           />
+        </label>
+        <label className="text-sm">
+          <span className={adminLabel}>Frequency</span>
+          <select
+            value={frequency}
+            onChange={(e) => {
+              setFrequency(e.target.value as IncomeFrequency)
+              setFormError(null)
+            }}
+            className={adminFieldInput}
+          >
+            {INCOME_FREQUENCY_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
         </label>
         <label className="text-sm">
           <span className={adminLabel}>Income (£)</span>
@@ -5417,8 +5496,8 @@ function ConstructionWeekLogViewPanel({
   return (
     <div className="space-y-5">
       <dl className="grid gap-2 text-sm sm:grid-cols-2">
-        <dt className="text-neutral-500">Programme</dt>
-        <dd className="font-medium text-neutral-900">Programme {programmeOrdinal}</dd>
+        <dt className="text-neutral-500">Schedule</dt>
+        <dd className="font-medium text-neutral-900">Schedule {programmeOrdinal}</dd>
         <dt className="text-neutral-500">Week number</dt>
         <dd className="font-medium text-neutral-900">{stage.weekNumber}</dd>
         <dt className="text-neutral-500">Upload date</dt>
@@ -5455,6 +5534,8 @@ function IncomeRowReadOnlyDetails({ row }: { row: IncomeRow }) {
     <dl className="grid gap-2 text-sm sm:grid-cols-[minmax(0,10rem)_1fr]">
       <dt className="text-neutral-500">Period</dt>
       <dd className="font-medium text-neutral-900">{row.period}</dd>
+      <dt className="text-neutral-500">Frequency</dt>
+      <dd className="text-neutral-800">{incomeFrequencyLabel(row.frequency)}</dd>
       <dt className="text-neutral-500">Income</dt>
       <dd className="tabular-nums text-neutral-800">{formatGbpAmount(row.incomeAmount)}</dd>
       <dt className="text-neutral-500">Costs</dt>
@@ -5662,7 +5743,7 @@ function ShortcutLogConstructionWeekForm({
           return
         }
         if (!projectId) {
-          setFormError("This property has no build programme yet. Add one from the property’s Construction tab.")
+          setFormError("This property has no build schedule yet. Add one from the property’s Construction tab.")
           return
         }
         const w = Number(weekNumber)
@@ -5732,7 +5813,7 @@ function ShortcutLogConstructionWeekForm({
         </select>
       </label>
       <label className="block text-sm">
-        <span className={adminLabel}>Build programme</span>
+        <span className={adminLabel}>Build schedule</span>
         <select
           value={projectId}
           onChange={(e) => {
@@ -5743,11 +5824,11 @@ function ShortcutLogConstructionWeekForm({
           disabled={submitting || !filteredProjects.length}
         >
           {!filteredProjects.length ? (
-            <option value="">No programme for this property</option>
+            <option value="">No schedule for this property</option>
           ) : (
             filteredProjects.map((p, idx) => (
               <option key={p.id} value={p.id}>
-                Programme {idx + 1}
+                Schedule {idx + 1}
                 {p.startDate ? ` · starts ${p.startDate}` : ""}
               </option>
             ))
@@ -5786,7 +5867,7 @@ function ShortcutLogConstructionWeekForm({
       </div>
       {projectId ? (
         <p className="text-xs text-neutral-600">
-          Programme id <span className="font-mono text-[11px]">{projectId}</span>
+          Schedule id <span className="font-mono text-[11px]">{projectId}</span>
         </p>
       ) : null}
       <div className="border-t border-neutral-100 pt-4">
@@ -6998,13 +7079,13 @@ function PropertyConstructionTabPanel({
   if (!constructionProjects.length) {
     return (
       <div className="rounded-xl border border-neutral-200 bg-white p-6 text-center shadow-sm">
-        <p className="text-sm text-neutral-600">No construction programme for this property yet.</p>
+        <p className="text-sm text-neutral-600">No construction schedule for this property yet.</p>
         <button
           type="button"
           onClick={() => setAddProgrammeOpen(true)}
           className="mt-4 rounded-lg bg-yhgc-crimson px-4 py-2 text-sm font-medium text-white"
         >
-          Add construction programme
+          Add construction schedule
         </button>
       </div>
     )
@@ -7015,9 +7096,9 @@ function PropertyConstructionTabPanel({
       <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm ring-1 ring-neutral-900/[0.04]">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h4 className="text-sm font-semibold text-yhgc-black">Build programmes on this property</h4>
+            <h4 className="text-sm font-semibold text-yhgc-black">Build schedules on this property</h4>
             <p className="mt-1 text-xs text-neutral-600">
-              {constructionProjects.length} programme{constructionProjects.length === 1 ? "" : "s"} linked to this
+              {constructionProjects.length} schedule{constructionProjects.length === 1 ? "" : "s"} linked to this
               property. Use each row for <strong>View</strong>, <strong>Log a New Week</strong>, <strong>Edit</strong>, or{" "}
               <strong>Delete</strong> — or expand for a quick preview.
             </p>
@@ -7027,7 +7108,7 @@ function PropertyConstructionTabPanel({
             onClick={() => setAddProgrammeOpen(true)}
             className="shrink-0 rounded-lg border border-yhgc-gold/50 bg-yhgc-gold/10 px-3 py-2 text-xs font-medium text-yhgc-black hover:bg-yhgc-gold/20"
           >
-            Add another programme
+            Add another schedule
           </button>
         </div>
         <ul className="mt-4 divide-y divide-neutral-100 rounded-xl border border-neutral-200 bg-neutral-50/60">
@@ -7044,7 +7125,7 @@ function PropertyConstructionTabPanel({
                   <button
                     type="button"
                     aria-expanded={rosterOpen}
-                    aria-label={rosterOpen ? "Collapse programme preview" : "Expand programme preview"}
+                    aria-label={rosterOpen ? "Collapse schedule preview" : "Expand schedule preview"}
                     onClick={() => setExpandedRosterId(rosterOpen ? null : p.id)}
                     className="mt-0.5 shrink-0 rounded-md border border-transparent p-1 text-neutral-500 hover:border-neutral-200 hover:bg-white hover:text-neutral-800"
                   >
@@ -7054,11 +7135,11 @@ function PropertyConstructionTabPanel({
                   </button>
                   <div className="min-w-0 flex-1">
                     <p className="font-medium text-yhgc-black">
-                      Programme {rosterIdx + 1}
+                      Schedule {rosterIdx + 1}
                       <span className="ml-2 font-mono text-xs font-normal text-neutral-500">{p.id.slice(0, 8)}…</span>
                     </p>
                     <p className="mt-1 text-xs text-neutral-600">
-                      <span className="font-medium text-neutral-800">{p.totalWeeks}</span> weeks in programme ·{" "}
+                      <span className="font-medium text-neutral-800">{p.totalWeeks}</span> weeks in schedule ·{" "}
                       <span className="font-medium text-neutral-800">{nStages}</span> week{nStages === 1 ? "" : "s"}{" "}
                       logged
                       {p.startDate ? (
@@ -7085,7 +7166,7 @@ function PropertyConstructionTabPanel({
                         onClick={() => setViewProgrammeId(p.id)}
                         className="rounded-lg border border-neutral-200 bg-white px-2.5 py-1.5 text-xs font-medium text-neutral-800 hover:bg-neutral-50"
                       >
-                        View programme
+                        View schedule
                       </button>
                       <button
                         type="button"
@@ -7189,7 +7270,7 @@ function PropertyConstructionTabPanel({
                         <dd className="mt-1 font-medium text-neutral-900">{p.expectedCompletionDate ?? "—"}</dd>
                       </div>
                       <div>
-                        <dt className="font-semibold uppercase tracking-wide text-neutral-500">Programme id</dt>
+                        <dt className="font-semibold uppercase tracking-wide text-neutral-500">Schedule id</dt>
                         <dd className="mt-1 break-all font-mono text-[11px] font-medium text-neutral-800">{p.id}</dd>
                       </div>
                     </dl>
@@ -7216,7 +7297,7 @@ function PropertyConstructionTabPanel({
           <div className="rounded-xl border border-amber-200/90 bg-amber-50/50 p-4 shadow-sm">
             <p className="text-sm font-medium text-amber-950">Property-level construction files (not tied to a week)</p>
             <p className="mt-1 text-xs text-amber-900/90">
-              Prefer attaching files under the right week via <strong>View programme</strong> → Week files. You can still open, rename, or remove these legacy entries.
+              Prefer attaching files under the right week via <strong>View schedule</strong> → Week files. You can still open, rename, or remove these legacy entries.
             </p>
             <div className="mt-3">
               <PropertyTabDocuments
@@ -7230,11 +7311,11 @@ function PropertyConstructionTabPanel({
         )
       })()}
       {addProgrammeOpen ? (
-        <EditModal title="Add build programme" onClose={() => setAddProgrammeOpen(false)}>
+        <EditModal title="Add build schedule" onClose={() => setAddProgrammeOpen(false)}>
           <ConstructionProjectFieldsForm
             key="add-programme"
             project={addProgrammeDraft}
-            submitLabel="Add programme"
+            submitLabel="Add schedule"
             showDeleteButton={false}
             requireStartAndCompletion
             onSave={(patch) => {
@@ -7254,7 +7335,7 @@ function PropertyConstructionTabPanel({
             if (!project) return null
             const programmeIdx = constructionProjects.findIndex((x) => x.id === project.id) + 1
             return (
-              <EditModal title={`Log a New Week · programme ${programmeIdx}`} onClose={closeLogWeekModal}>
+              <EditModal title={`Log a New Week · schedule ${programmeIdx}`} onClose={closeLogWeekModal}>
                 <form
                   noValidate
                   className="space-y-4"
@@ -7362,7 +7443,7 @@ function PropertyConstructionTabPanel({
                     </label>
                   </div>
                   <p className="text-xs text-neutral-600">
-                    Programme id <span className="font-mono text-[11px]">{project.id}</span>
+                    Schedule id <span className="font-mono text-[11px]">{project.id}</span>
                   </p>
                   <div className="border-t border-neutral-100 pt-4">
                     <span className={adminLabel}>Attachments (optional)</span>
@@ -7544,7 +7625,7 @@ function PropertyConstructionTabPanel({
             const programmeIdx = prog ? constructionProjects.findIndex((p) => p.id === prog.id) + 1 : 1
             return (
               <EditModal
-                title={`Edit logged week · programme ${programmeIdx}`}
+                title={`Edit logged week · schedule ${programmeIdx}`}
                 onClose={() => setEditConstructionStageId(null)}
               >
                 <ConstructionStageEditForm
@@ -7570,7 +7651,7 @@ function PropertyConstructionTabPanel({
               .sort((a, b) => a.weekNumber - b.weekNumber || a.uploadDate.localeCompare(b.uploadDate))
             return (
               <EditModal
-                title={`Programme ${rosterIdx} · review`}
+                title={`Schedule ${rosterIdx} · review`}
                 onClose={() => setViewProgrammeId(null)}
               >
                 <div className="space-y-5">
@@ -7589,7 +7670,7 @@ function PropertyConstructionTabPanel({
                     </div>
                   </dl>
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Programme id</p>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Schedule id</p>
                     <p className="mt-1 break-all font-mono text-xs text-neutral-800">{prog.id}</p>
                   </div>
                   <div className="rounded-lg border border-neutral-200 bg-neutral-50/80 p-3">
@@ -7692,7 +7773,7 @@ function PropertyConstructionTabPanel({
                       }}
                       className="rounded-lg border border-neutral-200 bg-white px-3 py-2 text-xs font-medium text-neutral-800 hover:bg-neutral-50"
                     >
-                      Edit programme
+                      Edit schedule
                     </button>
                   </div>
                 </div>
@@ -7705,7 +7786,7 @@ function PropertyConstructionTabPanel({
             const prog = constructionProjects.find((x) => x.id === editProgrammeId)
             if (!prog) return null
             return (
-              <EditModal title="Edit build programme" onClose={() => setEditProgrammeId(null)}>
+              <EditModal title="Edit build schedule" onClose={() => setEditProgrammeId(null)}>
                 <ConstructionProjectFieldsForm
                   key={prog.id}
                   project={prog}
@@ -7725,9 +7806,9 @@ function PropertyConstructionTabPanel({
             if (!prog) return null
             const idx = constructionProjects.findIndex((x) => x.id === prog.id) + 1
             return (
-              <EditModal title="Delete build programme?" onClose={() => setDeleteProgrammeId(null)}>
+              <EditModal title="Delete build schedule?" onClose={() => setDeleteProgrammeId(null)}>
                 <p className="text-sm leading-relaxed text-neutral-700">
-                  This will permanently remove <strong>build programme {idx}</strong>, every logged week on that programme,
+                  This will permanently remove <strong>build schedule {idx}</strong>, every logged week on that schedule,
                   and all construction files attached to those weeks.
                 </p>
                 <div className="mt-6 flex flex-wrap justify-end gap-2 border-t border-neutral-100 pt-4">
@@ -7746,7 +7827,7 @@ function PropertyConstructionTabPanel({
                     }}
                     className={adminBtnDangerOutline}
                   >
-                    Delete programme
+                    Delete schedule
                   </button>
                 </div>
               </EditModal>
@@ -8183,10 +8264,15 @@ function PropertyTabEditor({
     )
   }
 
+  if (tab === "expenses") {
+    return <PropertyExpensesTabPanel propertyId={propertyId} />
+  }
+
   if (tab === "income") {
     const sortedRows = incomeRows.slice().sort((a, b) => b.period.localeCompare(a.period))
     return (
       <div className="space-y-4">
+        <PropertyRentSchedulePanel property={property} />
         <div className="flex flex-wrap items-center justify-end gap-2">
           <button
             type="button"
@@ -8204,6 +8290,7 @@ function PropertyTabEditor({
               <thead>
                 <tr className="border-b border-neutral-200 bg-neutral-50/90 text-left text-xs font-semibold uppercase tracking-wide text-neutral-600">
                   <th className="px-4 py-3">Period</th>
+                  <th className="px-4 py-3">Frequency</th>
                   <th className="px-4 py-3 text-right">Income (£)</th>
                   <th className="px-4 py-3 text-right">Costs (£)</th>
                   <th className="min-w-[13rem] px-4 py-3 text-right">Actions</th>
@@ -8213,6 +8300,7 @@ function PropertyTabEditor({
                 {sortedRows.map((row) => (
                   <tr key={row.id} className="bg-white">
                     <td className="px-4 py-3 font-medium text-neutral-900">{row.period}</td>
+                    <td className="px-4 py-3 text-neutral-700">{incomeFrequencyLabel(row.frequency)}</td>
                     <td className="px-4 py-3 text-right tabular-nums text-neutral-800">{formatGbpAmount(row.incomeAmount)}</td>
                     <td className="px-4 py-3 text-right tabular-nums text-neutral-800">{formatGbpAmount(row.costAmount)}</td>
                     <td className="px-4 py-3 text-right">
@@ -8594,7 +8682,7 @@ function ConstructionProjectFieldsForm({
   onSave,
   onDelete,
   showDeleteButton = true,
-  submitLabel = "Save programme dates",
+  submitLabel = "Save schedule dates",
   requireStartAndCompletion = false,
 }: {
   project: ConstructionProject
@@ -8630,7 +8718,7 @@ function ConstructionProjectFieldsForm({
 
     if (requireStartAndCompletion) {
       if (!startTrim || !endTrim) {
-        setFormError("Choose a start date and an expected completion date for this programme.")
+        setFormError("Choose a start date and an expected completion date for this schedule.")
         return
       }
     } else if ((startTrim && !endTrim) || (!startTrim && endTrim)) {
@@ -8702,7 +8790,7 @@ function ConstructionProjectFieldsForm({
         </button>
         {onDelete && showDeleteButton ? (
           <button type="button" onClick={onDelete} className={adminBtnDangerOutline}>
-            Delete programme
+            Delete schedule
           </button>
         ) : null}
       </div>
@@ -8720,6 +8808,7 @@ function IncomeNewRowForm({
   onDone?: () => void
 }) {
   const [period, setPeriod] = useState("")
+  const [frequency, setFrequency] = useState<IncomeFrequency>("monthly")
   const [incomeAmount, setIncomeAmount] = useState("")
   const [costAmount, setCostAmount] = useState("")
   const [formError, setFormError] = useState<string | null>(null)
@@ -8744,8 +8833,9 @@ function IncomeNewRowForm({
       setFormError("Income and costs must each be a non-zero amount (not £0).")
       return
     }
-    onAdd({ propertyId, period: period.trim(), incomeAmount: inc, costAmount: cost })
+    onAdd({ propertyId, period: period.trim(), frequency, incomeAmount: inc, costAmount: cost })
     setPeriod("")
+    setFrequency("monthly")
     setIncomeAmount("")
     setCostAmount("")
     onDone?.()
@@ -8757,7 +8847,7 @@ function IncomeNewRowForm({
           {formError}
         </p>
       ) : null}
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2">
         <label className="text-sm">
           <span className={adminLabel}>Period</span>
           <input
@@ -8769,6 +8859,23 @@ function IncomeNewRowForm({
             className={adminFieldInput}
             type="month"
           />
+        </label>
+        <label className="text-sm">
+          <span className={adminLabel}>Frequency</span>
+          <select
+            value={frequency}
+            onChange={(e) => {
+              setFrequency(e.target.value as IncomeFrequency)
+              setFormError(null)
+            }}
+            className={adminFieldInput}
+          >
+            {INCOME_FREQUENCY_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
         </label>
         <label className="text-sm">
           <span className={adminLabel}>Income (£)</span>
@@ -8803,6 +8910,684 @@ function IncomeNewRowForm({
         </button>
       </div>
     </form>
+  )
+}
+
+/* ----------------------------------------------------------------------------
+ * Rent schedule + automatic rent-received tracking (client feedback #5 / #7)
+ * ------------------------------------------------------------------------- */
+
+const RENT_FREQUENCY_OPTIONS: { value: RentFrequency; label: string }[] = [
+  { value: "monthly", label: "Monthly" },
+  { value: "weekly", label: "Weekly" },
+  { value: "fortnightly", label: "Fortnightly" },
+]
+
+function rentFrequencyLabel(v: Property["rentFrequency"]): string {
+  return RENT_FREQUENCY_OPTIONS.find((o) => o.value === v)?.label ?? "—"
+}
+
+/** Parse a YYYY-MM-DD (or ISO) string as a local date, avoiding UTC off-by-one. */
+function parseISODateLocal(value: string | undefined): Date | null {
+  if (!value) return null
+  const m = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+  const t = Date.parse(value)
+  return Number.isFinite(t) ? new Date(t) : null
+}
+
+function toISODateString(d: Date): string {
+  return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, "0"), String(d.getDate()).padStart(2, "0")].join("-")
+}
+
+function todayISODate(): string {
+  return toISODateString(new Date())
+}
+
+/** Nth monthly occurrence from a start date, clamped to a valid day for short months. */
+function monthlyRentOccurrence(start: Date, n: number, dueDay?: number): Date {
+  const base = new Date(start.getFullYear(), start.getMonth() + n, 1)
+  const lastDay = new Date(base.getFullYear(), base.getMonth() + 1, 0).getDate()
+  const day = Math.min(dueDay && dueDay >= 1 ? dueDay : start.getDate(), lastDay)
+  return new Date(base.getFullYear(), base.getMonth(), day)
+}
+
+/** Every rent due date from the schedule start up to (and including) today. */
+function rentDueDatesUpTo(property: Property, todayISO: string): string[] {
+  const freq = property.rentFrequency
+  const start = parseISODateLocal(property.rentStartDate)
+  if (!freq || !start) return []
+  const today = parseISODateLocal(todayISO) ?? new Date()
+  const out: string[] = []
+  for (let i = 0; i < 240; i++) {
+    let d: Date
+    if (freq === "monthly") {
+      d = monthlyRentOccurrence(start, i, property.rentDueDay)
+    } else {
+      const stepDays = freq === "weekly" ? 7 : 14
+      d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i * stepDays)
+    }
+    if (d.getTime() > today.getTime()) break
+    out.push(toISODateString(d))
+  }
+  return out
+}
+
+function isRentLate(receipt: RentReceipt): boolean {
+  if (!receipt.receivedDate) return false
+  const due = parseISODateLocal(receipt.dueDate)
+  const rec = parseISODateLocal(receipt.receivedDate)
+  return !!due && !!rec && rec.getTime() > due.getTime()
+}
+
+function hasRentSchedule(property: Property): boolean {
+  return !!property.rentFrequency && !!property.rentStartDate && (property.rentAmount ?? 0) > 0
+}
+
+function RentScheduleForm({
+  property,
+  onSave,
+}: {
+  property: Property
+  onSave: (patch: Partial<Pick<Property, "rentAmount" | "rentFrequency" | "rentDueDay" | "rentStartDate">>) => void
+}) {
+  const [amount, setAmount] = useState(property.rentAmount != null ? String(property.rentAmount) : "")
+  const [frequency, setFrequency] = useState<NonNullable<Property["rentFrequency"]>>(property.rentFrequency ?? "monthly")
+  const [dueDay, setDueDay] = useState(property.rentDueDay != null ? String(property.rentDueDay) : "1")
+  const [startDate, setStartDate] = useState(toHtmlDateInputValue(property.rentStartDate))
+  const [formError, setFormError] = useState<string | null>(null)
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    setFormError(null)
+    const a = Number(amount)
+    if (!Number.isFinite(a) || a <= 0) {
+      setFormError("Enter the rent amount due each period (greater than zero).")
+      return
+    }
+    if (!startDate.trim()) {
+      setFormError("Choose the date the first rent payment is/was due.")
+      return
+    }
+    let day: number | undefined
+    if (frequency === "monthly") {
+      const d = Number(dueDay)
+      if (!Number.isFinite(d) || d < 1 || d > 31) {
+        setFormError("Day of month must be between 1 and 31.")
+        return
+      }
+      day = d
+    }
+    onSave({
+      rentAmount: a,
+      rentFrequency: frequency,
+      rentDueDay: day,
+      rentStartDate: startDate,
+    })
+  }
+
+  return (
+    <form noValidate onSubmit={submit} className="space-y-4">
+      {formError ? <p role="alert" className={adminFormAlert}>{formError}</p> : null}
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="text-sm">
+          <span className={adminLabel}>Rent amount (£)</span>
+          <input
+            value={amount}
+            onChange={(e) => { setAmount(e.target.value); setFormError(null) }}
+            className={adminFieldInput}
+            type="number"
+            step="0.01"
+            min={0}
+            placeholder="e.g. 1350"
+          />
+        </label>
+        <label className="text-sm">
+          <span className={adminLabel}>Frequency</span>
+          <select
+            value={frequency}
+            onChange={(e) => { setFrequency(e.target.value as NonNullable<Property["rentFrequency"]>); setFormError(null) }}
+            className={adminFieldInput}
+          >
+            {RENT_FREQUENCY_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="text-sm">
+          <span className={adminLabel}>{frequency === "monthly" ? "First payment date" : "First / anchor date"}</span>
+          <input
+            value={startDate}
+            onChange={(e) => { setStartDate(e.target.value); setFormError(null) }}
+            className={adminFieldInput}
+            type="date"
+          />
+        </label>
+        {frequency === "monthly" ? (
+          <label className="text-sm">
+            <span className={adminLabel}>Day of month due</span>
+            <input
+              value={dueDay}
+              onChange={(e) => { setDueDay(e.target.value); setFormError(null) }}
+              className={adminFieldInput}
+              type="number"
+              min={1}
+              max={31}
+              placeholder="e.g. 1"
+            />
+          </label>
+        ) : null}
+      </div>
+      <div className="flex flex-wrap gap-2 border-t border-neutral-100 pt-4">
+        <button type="submit" className={adminBtnPrimary}>Save rent schedule</button>
+      </div>
+    </form>
+  )
+}
+
+function MarkRentReceivedForm({
+  defaultAmount,
+  dueDate,
+  onSubmit,
+}: {
+  defaultAmount: number
+  dueDate: string
+  onSubmit: (amount: number, receivedDate: string) => void
+}) {
+  const [amount, setAmount] = useState(defaultAmount ? String(defaultAmount) : "")
+  const [receivedDate, setReceivedDate] = useState(todayISODate())
+  const [formError, setFormError] = useState<string | null>(null)
+
+  const due = parseISODateLocal(dueDate)
+  const rec = parseISODateLocal(receivedDate)
+  const late = !!due && !!rec && rec.getTime() > due.getTime()
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    setFormError(null)
+    const a = Number(amount)
+    if (!Number.isFinite(a) || a <= 0) {
+      setFormError("Enter the rent amount received.")
+      return
+    }
+    if (!receivedDate.trim()) {
+      setFormError("Choose the date the rent was received.")
+      return
+    }
+    onSubmit(a, receivedDate)
+  }
+
+  return (
+    <form noValidate onSubmit={submit} className="space-y-4">
+      {formError ? <p role="alert" className={adminFormAlert}>{formError}</p> : null}
+      <p className="text-sm text-neutral-600">
+        Rent due on <strong>{dueDate}</strong>. Confirm the amount received and the date it arrived. If it arrived after
+        the due date it will be flagged as a late payment.
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="text-sm">
+          <span className={adminLabel}>Amount received (£)</span>
+          <input
+            value={amount}
+            onChange={(e) => { setAmount(e.target.value); setFormError(null) }}
+            className={adminFieldInput}
+            type="number"
+            step="0.01"
+            min={0}
+          />
+        </label>
+        <label className="text-sm">
+          <span className={adminLabel}>Date received</span>
+          <input
+            value={receivedDate}
+            onChange={(e) => { setReceivedDate(e.target.value); setFormError(null) }}
+            className={adminFieldInput}
+            type="date"
+          />
+        </label>
+      </div>
+      {late ? (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          This payment will be recorded as <strong>late</strong> (received after the due date).
+        </p>
+      ) : null}
+      <div className="flex flex-wrap gap-2 border-t border-neutral-100 pt-4">
+        <button type="submit" className={adminBtnPrimary}>Confirm rent received</button>
+      </div>
+    </form>
+  )
+}
+
+function PropertyRentSchedulePanel({ property }: { property: Property }) {
+  const rentReceipts = useAppStore((s) => s.snapshot?.rentReceipts ?? [])
+  const markRentReceived = useAppStore((s) => s.markRentReceived)
+  const deleteRentReceipt = useAppStore((s) => s.deleteRentReceipt)
+  const updateProperty = useAppStore((s) => s.updateProperty)
+  const persist = useAppStore((s) => s.persist)
+
+  const [editScheduleOpen, setEditScheduleOpen] = useState(false)
+  const [receiveDueDate, setReceiveDueDate] = useState<string | null>(null)
+
+  const receiptsForProp = useMemo(
+    () => rentReceipts.filter((r) => r.propertyId === property.id),
+    [rentReceipts, property.id],
+  )
+  const today = todayISODate()
+  const scheduled = hasRentSchedule(property)
+  const dueDates = useMemo(
+    () => (scheduled ? rentDueDatesUpTo(property, today) : []),
+    [property, today, scheduled],
+  )
+  const recordedDueSet = useMemo(() => new Set(receiptsForProp.map((r) => r.dueDate)), [receiptsForProp])
+  const pendingDue = useMemo(
+    () => dueDates.filter((d) => !recordedDueSet.has(d)).sort((a, b) => b.localeCompare(a)),
+    [dueDates, recordedDueSet],
+  )
+  const receivedSorted = useMemo(
+    () => receiptsForProp.slice().sort((a, b) => b.dueDate.localeCompare(a.dueDate)),
+    [receiptsForProp],
+  )
+  const totalReceived = receivedSorted.reduce((s, r) => s + (r.amount || 0), 0)
+  const lateCount = receivedSorted.filter((r) => isRentLate(r)).length
+  const rentAmount = property.rentAmount ?? 0
+
+  return (
+    <div className="rounded-xl border border-yhgc-gold/30 bg-yhgc-gold/5 p-4 shadow-sm">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <h4 className="text-sm font-semibold text-yhgc-black">Rent schedule &amp; receipts</h4>
+          <p className="mt-1 text-xs text-neutral-600">
+            Set the rent and the date it is due. Each period that has passed appears below to confirm
+            <strong> Rent received</strong>; confirmed rent rolls up into this property’s and the portfolio’s income.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setEditScheduleOpen(true)}
+          className="shrink-0 rounded-lg border border-yhgc-gold/50 bg-white px-3 py-2 text-xs font-medium text-yhgc-black hover:bg-yhgc-gold/10"
+        >
+          {scheduled ? "Edit rent schedule" : "Set up rent schedule"}
+        </button>
+      </div>
+
+      {scheduled ? (
+        <dl className="mt-3 grid gap-x-4 gap-y-1 text-sm sm:grid-cols-2">
+          <div className="flex justify-between gap-2 sm:block">
+            <dt className="text-neutral-500">Rent</dt>
+            <dd className="font-medium text-neutral-900">
+              {formatGbpAmount(rentAmount)} · {rentFrequencyLabel(property.rentFrequency)}
+            </dd>
+          </div>
+          <div className="flex justify-between gap-2 sm:block">
+            <dt className="text-neutral-500">{property.rentFrequency === "monthly" ? "Due each month on" : "Anchor date"}</dt>
+            <dd className="font-medium text-neutral-900">
+              {property.rentFrequency === "monthly"
+                ? `Day ${property.rentDueDay ?? parseISODateLocal(property.rentStartDate)?.getDate() ?? "—"}`
+                : (property.rentStartDate ?? "—")}
+            </dd>
+          </div>
+          <div className="flex justify-between gap-2 sm:block">
+            <dt className="text-neutral-500">Rent received to date</dt>
+            <dd className="font-medium text-neutral-900">{formatGbpAmount(totalReceived)}</dd>
+          </div>
+          <div className="flex justify-between gap-2 sm:block">
+            <dt className="text-neutral-500">Late payments</dt>
+            <dd className={`font-medium ${lateCount ? "text-amber-700" : "text-neutral-900"}`}>{lateCount}</dd>
+          </div>
+        </dl>
+      ) : (
+        <p className="mt-3 text-sm text-neutral-600">
+          No rent schedule yet. Use <strong>Set up rent schedule</strong> to start tracking rent for this property.
+        </p>
+      )}
+
+      {scheduled && pendingDue.length > 0 ? (
+        <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50/70 p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-amber-900">
+            Rent due to confirm ({pendingDue.length})
+          </p>
+          <ul className="mt-2 divide-y divide-amber-100">
+            {pendingDue.map((d) => (
+              <li key={d} className="flex flex-wrap items-center justify-between gap-2 py-2">
+                <span className="text-sm text-neutral-800">
+                  Due <strong>{d}</strong> · {formatGbpAmount(rentAmount)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setReceiveDueDate(d)}
+                  className="rounded-lg bg-yhgc-crimson px-3 py-1.5 text-xs font-medium text-white hover:opacity-90"
+                >
+                  Rent received
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {receivedSorted.length > 0 ? (
+        <div className="mt-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Recorded rent</p>
+          <ul className="mt-2 divide-y divide-neutral-100 rounded-lg border border-neutral-200 bg-white">
+            {receivedSorted.map((r) => (
+              <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
+                <span className="text-neutral-800">
+                  Due {r.dueDate} · received {r.receivedDate ?? "—"} · {formatGbpAmount(r.amount)}
+                  {isRentLate(r) ? (
+                    <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800">Late</span>
+                  ) : null}
+                </span>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!(await themedConfirm(`Remove the rent payment recorded for ${r.dueDate}?`))) return
+                    deleteRentReceipt(r.id)
+                    void persist()
+                  }}
+                  className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-medium text-red-800 hover:bg-red-100"
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {editScheduleOpen ? (
+        <EditModal title="Rent schedule" onClose={() => setEditScheduleOpen(false)}>
+          <RentScheduleForm
+            property={property}
+            onSave={(patch) => {
+              updateProperty(property.id, patch)
+              void persist()
+              setEditScheduleOpen(false)
+            }}
+          />
+        </EditModal>
+      ) : null}
+
+      {receiveDueDate ? (
+        <EditModal title="Confirm rent received" onClose={() => setReceiveDueDate(null)}>
+          <MarkRentReceivedForm
+            defaultAmount={rentAmount}
+            dueDate={receiveDueDate}
+            onSubmit={(amount, receivedDate) => {
+              markRentReceived({ propertyId: property.id, dueDate: receiveDueDate, amount, receivedDate })
+              void persist()
+              setReceiveDueDate(null)
+            }}
+          />
+        </EditModal>
+      ) : null}
+    </div>
+  )
+}
+
+/* ----------------------------------------------------------------------------
+ * Expenses tab (client feedback #6) — one-off and repeating running costs
+ * ------------------------------------------------------------------------- */
+
+const EXPENSE_RECURRENCE_OPTIONS: { value: ExpenseRecurrence; label: string }[] = [
+  { value: "one_off", label: "One-off" },
+  { value: "repeating", label: "Repeating (monthly)" },
+]
+
+function expenseRecurrenceLabel(v: Expense["recurrence"]): string {
+  return EXPENSE_RECURRENCE_OPTIONS.find((o) => o.value === v)?.label ?? "One-off"
+}
+
+function ExpenseForm({
+  expense,
+  submitLabel,
+  onSubmit,
+}: {
+  expense: Expense
+  submitLabel: string
+  onSubmit: (patch: Pick<Expense, "description" | "category" | "amount" | "date" | "recurrence">) => void
+}) {
+  const [description, setDescription] = useState(expense.description)
+  const [category, setCategory] = useState(expense.category ?? "")
+  const [amount, setAmount] = useState(expense.amount ? String(expense.amount) : "")
+  const [date, setDate] = useState(toHtmlDateInputValue(expense.date) || todayISODate())
+  const [recurrence, setRecurrence] = useState<Expense["recurrence"]>(expense.recurrence ?? "one_off")
+  const [formError, setFormError] = useState<string | null>(null)
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    setFormError(null)
+    if (!description.trim()) {
+      setFormError("Enter a short description (e.g. communal clean).")
+      return
+    }
+    const a = Number(amount)
+    if (!Number.isFinite(a) || a <= 0) {
+      setFormError("Enter an amount greater than zero.")
+      return
+    }
+    if (!date.trim()) {
+      setFormError("Choose the date this expense applies from.")
+      return
+    }
+    onSubmit({
+      description: description.trim(),
+      category: category.trim() || undefined,
+      amount: a,
+      date,
+      recurrence,
+    })
+  }
+
+  return (
+    <form noValidate onSubmit={submit} className="space-y-4">
+      {formError ? <p role="alert" className={adminFormAlert}>{formError}</p> : null}
+      <label className="block text-sm">
+        <span className={adminLabel}>Description</span>
+        <input
+          value={description}
+          onChange={(e) => { setDescription(e.target.value); setFormError(null) }}
+          className={adminFieldInput}
+          placeholder="e.g. Communal clean / repair toilet seat"
+        />
+      </label>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="text-sm">
+          <span className={adminLabel}>Category (optional)</span>
+          <input
+            value={category}
+            onChange={(e) => { setCategory(e.target.value); setFormError(null) }}
+            className={adminFieldInput}
+            placeholder="e.g. Maintenance"
+          />
+        </label>
+        <label className="text-sm">
+          <span className={adminLabel}>Amount (£)</span>
+          <input
+            value={amount}
+            onChange={(e) => { setAmount(e.target.value); setFormError(null) }}
+            className={adminFieldInput}
+            type="number"
+            step="0.01"
+            min={0}
+          />
+        </label>
+        <label className="text-sm">
+          <span className={adminLabel}>Date</span>
+          <input
+            value={date}
+            onChange={(e) => { setDate(e.target.value); setFormError(null) }}
+            className={adminFieldInput}
+            type="date"
+          />
+        </label>
+        <label className="text-sm">
+          <span className={adminLabel}>Type</span>
+          <select
+            value={recurrence}
+            onChange={(e) => { setRecurrence(e.target.value as Expense["recurrence"]); setFormError(null) }}
+            className={adminFieldInput}
+          >
+            {EXPENSE_RECURRENCE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <p className="text-xs text-neutral-500">
+        <strong>Repeating</strong> costs are treated as monthly and are automatically deducted from the property’s and
+        portfolio’s net income each month. <strong>One-off</strong> costs apply once.
+      </p>
+      <div className="flex flex-wrap gap-2 border-t border-neutral-100 pt-4">
+        <button type="submit" className={adminBtnPrimary}>{submitLabel}</button>
+      </div>
+    </form>
+  )
+}
+
+function PropertyExpensesTabPanel({ propertyId }: { propertyId: string }) {
+  const expensesAll = useAppStore((s) => s.snapshot?.expenses ?? [])
+  const addExpense = useAppStore((s) => s.addExpense)
+  const updateExpense = useAppStore((s) => s.updateExpense)
+  const deleteExpense = useAppStore((s) => s.deleteExpense)
+  const persist = useAppStore((s) => s.persist)
+
+  const [addOpen, setAddOpen] = useState(false)
+  const [editId, setEditId] = useState<string | null>(null)
+
+  const expenses = useMemo(
+    () =>
+      expensesAll
+        .filter((e) => e.propertyId === propertyId)
+        .slice()
+        .sort((a, b) => (b.date || "").localeCompare(a.date || "")),
+    [expensesAll, propertyId],
+  )
+  const monthlyRepeating = expenses
+    .filter((e) => e.recurrence === "repeating")
+    .reduce((s, e) => s + (e.amount || 0), 0)
+  const oneOffTotal = expenses
+    .filter((e) => e.recurrence === "one_off")
+    .reduce((s, e) => s + (e.amount || 0), 0)
+
+  const blankExpense: Expense = {
+    id: "__draft__",
+    propertyId,
+    description: "",
+    amount: 0,
+    date: todayISODate(),
+    recurrence: "one_off",
+  }
+  const editing = editId ? expenses.find((e) => e.id === editId) ?? null : null
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-sm text-neutral-600">
+          <span className="mr-3">Repeating: <strong className="text-neutral-900">{formatGbpAmount(monthlyRepeating)}</strong>/mo</span>
+          <span>One-off total: <strong className="text-neutral-900">{formatGbpAmount(oneOffTotal)}</strong></span>
+        </div>
+        <button
+          type="button"
+          onClick={() => setAddOpen(true)}
+          className="rounded-lg border border-yhgc-gold/50 bg-yhgc-gold/10 px-3 py-2 text-sm font-medium text-yhgc-black hover:bg-yhgc-gold/20"
+        >
+          Add expense
+        </button>
+      </div>
+
+      {!expenses.length ? (
+        <p className="text-sm text-neutral-500">
+          No expenses yet. Use <strong>Add expense</strong> to record ongoing or one-off running costs (e.g. communal
+          clean, repairs).
+        </p>
+      ) : (
+        <div className="overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-sm ring-1 ring-neutral-900/[0.04]">
+          <table className="w-full min-w-[20rem] border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-neutral-200 bg-neutral-50/90 text-left text-xs font-semibold uppercase tracking-wide text-neutral-600">
+                <th className="px-4 py-3">Description</th>
+                <th className="px-4 py-3">Date</th>
+                <th className="px-4 py-3">Type</th>
+                <th className="px-4 py-3 text-right">Amount (£)</th>
+                <th className="min-w-[9rem] px-4 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-neutral-100">
+              {expenses.map((e) => (
+                <tr key={e.id} className="bg-white">
+                  <td className="px-4 py-3 font-medium text-neutral-900">
+                    {e.description}
+                    {e.category ? <span className="ml-2 text-xs font-normal text-neutral-500">{e.category}</span> : null}
+                  </td>
+                  <td className="px-4 py-3 text-neutral-700">{e.date}</td>
+                  <td className="px-4 py-3">
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                        e.recurrence === "repeating" ? "bg-yhgc-gold/20 text-yhgc-black" : "bg-neutral-100 text-neutral-700"
+                      }`}
+                    >
+                      {expenseRecurrenceLabel(e.recurrence)}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-right tabular-nums text-neutral-800">{formatGbpAmount(e.amount)}</td>
+                  <td className="px-4 py-3 text-right">
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setEditId(e.id)}
+                        className="rounded-lg border border-neutral-200 bg-white px-2.5 py-1.5 text-xs font-medium text-neutral-800 hover:bg-neutral-50"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!(await themedConfirm(`Delete expense “${e.description}”?`))) return
+                          deleteExpense(e.id)
+                          void persist()
+                        }}
+                        className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs font-medium text-red-800 hover:bg-red-100"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {addOpen ? (
+        <EditModal title="Add expense" onClose={() => setAddOpen(false)}>
+          <ExpenseForm
+            expense={blankExpense}
+            submitLabel="Add expense"
+            onSubmit={(patch) => {
+              addExpense({ propertyId, ...patch })
+              void persist()
+              setAddOpen(false)
+            }}
+          />
+        </EditModal>
+      ) : null}
+
+      {editing ? (
+        <EditModal title="Edit expense" onClose={() => setEditId(null)}>
+          <ExpenseForm
+            key={editing.id}
+            expense={editing}
+            submitLabel="Save expense"
+            onSubmit={(patch) => {
+              updateExpense(editing.id, patch)
+              void persist()
+              setEditId(null)
+            }}
+          />
+        </EditModal>
+      ) : null}
+    </div>
   )
 }
 

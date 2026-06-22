@@ -33,6 +33,11 @@ class Property {
   final String? incomeToDateLabel;
   final String? costToDateLabel;
   final String? netPositionLabel;
+  // Rent schedule (set by the administrator) — drives rent-received tracking.
+  final double? rentAmount;
+  final String? rentFrequency; // 'monthly' | 'weekly' | 'fortnightly'
+  final int? rentDueDay; // day of month for monthly schedules
+  final String? rentStartDate;
 
   const Property({
     required this.id,
@@ -51,9 +56,20 @@ class Property {
     this.incomeToDateLabel,
     this.costToDateLabel,
     this.netPositionLabel,
+    this.rentAmount,
+    this.rentFrequency,
+    this.rentDueDay,
+    this.rentStartDate,
   });
 
   String get displayTitle => title.trim().isNotEmpty ? title.trim() : address;
+
+  bool get hasRentSchedule =>
+      rentFrequency != null &&
+      rentFrequency!.isNotEmpty &&
+      rentStartDate != null &&
+      rentStartDate!.isNotEmpty &&
+      (rentAmount ?? 0) > 0;
 }
 
 class Invoice {
@@ -159,6 +175,7 @@ class IncomeRow {
   final String period;
   final double incomeAmount;
   final double costAmount;
+  final String? frequency; // 'monthly' | 'weekly' | 'fortnightly' | 'one_off'
 
   const IncomeRow({
     required this.id,
@@ -166,7 +183,57 @@ class IncomeRow {
     required this.period,
     required this.incomeAmount,
     required this.costAmount,
+    this.frequency,
   });
+}
+
+/// An ongoing or one-off operating cost for a property (admin-managed).
+class Expense {
+  final String id;
+  final String propertyId;
+  final String description;
+  final String? category;
+  final double amount;
+  final String date;
+  final String recurrence; // 'one_off' | 'repeating'
+
+  const Expense({
+    required this.id,
+    required this.propertyId,
+    required this.description,
+    this.category,
+    required this.amount,
+    required this.date,
+    required this.recurrence,
+  });
+
+  bool get isRepeating => recurrence == 'repeating';
+}
+
+/// A confirmed (or due) rent payment for one scheduled occurrence.
+class RentReceipt {
+  final String id;
+  final String propertyId;
+  final String dueDate;
+  final double amount;
+  final String? receivedDate;
+
+  const RentReceipt({
+    required this.id,
+    required this.propertyId,
+    required this.dueDate,
+    required this.amount,
+    this.receivedDate,
+  });
+
+  bool get isReceived => (receivedDate ?? '').isNotEmpty;
+
+  /// ISO dates (YYYY-MM-DD) compare lexically, so this flags a late payment.
+  bool get isLate {
+    final r = receivedDate;
+    if (r == null || r.isEmpty) return false;
+    return r.compareTo(dueDate) > 0;
+  }
 }
 
 class InsuranceRecord {

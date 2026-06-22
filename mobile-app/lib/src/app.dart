@@ -14,6 +14,36 @@ import 'package:yhgc_mobile_app/src/services/fcm_service.dart';
 import 'package:yhgc_mobile_app/src/widgets/portfolio_file_opener.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
+/// Pounds-sterling formatter with thousands separators, e.g. £1,350 (negatives keep the sign).
+String formatGbp(num value) {
+  final negative = value < 0;
+  final digits = value.abs().round().toString();
+  final buffer = StringBuffer();
+  for (var i = 0; i < digits.length; i++) {
+    if (i > 0 && (digits.length - i) % 3 == 0) buffer.write(',');
+    buffer.write(digits[i]);
+  }
+  return '${negative ? '-' : ''}£$buffer';
+}
+
+String rentFrequencyLabelMobile(String? value) {
+  switch (value) {
+    case 'monthly':
+      return 'Monthly';
+    case 'weekly':
+      return 'Weekly';
+    case 'fortnightly':
+      return 'Fortnightly';
+    default:
+      return '—';
+  }
+}
+
+String incomeFrequencyLabelMobile(String? value) {
+  if (value == 'one_off') return 'One-off';
+  return rentFrequencyLabelMobile(value);
+}
+
 String _loanAmountPcmLine(FinanceRecord f, String Function(num) money) {
   final a = f.loanAmount;
   final m = f.monthlyPayment;
@@ -220,7 +250,11 @@ class SplashPage extends StatelessWidget {
               end: Alignment.bottomRight,
             ),
           ),
-          child: Padding(
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              const _BrandWatermark(tint: Colors.white),
+              Padding(
             padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 20),
             child: Column(
               children: [
@@ -278,6 +312,8 @@ class SplashPage extends StatelessWidget {
                 ),
               ],
             ),
+          ),
+            ],
           ),
         ),
       ),
@@ -357,7 +393,11 @@ class _LoginPageState extends State<LoginPage> {
             end: Alignment.bottomCenter,
           ),
         ),
-        child: Padding(
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            const _BrandWatermark(tint: AppColors.crimson),
+            Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -449,6 +489,8 @@ class _LoginPageState extends State<LoginPage> {
             ],
           ),
         ),
+            ],
+          ),
       ),
     );
   }
@@ -892,7 +934,7 @@ class ShellPage extends StatelessWidget {
 class DashboardPage extends StatelessWidget {
   const DashboardPage({super.key});
 
-  String _money(num value) => '£${value.toStringAsFixed(0)}';
+  String _money(num value) => formatGbp(value);
 
   @override
   Widget build(BuildContext context) {
@@ -923,10 +965,17 @@ class DashboardPage extends StatelessWidget {
           }
 
           final totalPortfolioValue = app.properties.fold<double>(0, (sum, p) => sum + p.value);
-          final monthlyNetIncome = app.properties.fold<double>(0, (sum, p) => sum + p.net);
-          final expenditure = app.invoices.fold<double>(0, (sum, invoice) => sum + invoice.amount);
+          final grossMonthlyNet = app.properties.fold<double>(0, (sum, p) => sum + p.net);
+          // Repeating (monthly) expenses come off the monthly net income.
+          final monthlyExpenses =
+              app.expenses.where((e) => e.isRepeating).fold<double>(0, (sum, e) => sum + e.amount);
+          final monthlyNetIncome = grossMonthlyNet - monthlyExpenses;
+          // Total outflow = supplier invoices + all recorded expenses (one-off + repeating).
+          final allExpenses = app.expenses.fold<double>(0, (sum, e) => sum + e.amount);
+          final expenditure =
+              app.invoices.fold<double>(0, (sum, invoice) => sum + invoice.amount) + allExpenses;
           final activeAssets = app.properties.where((p) => p.status != 'Vacant').length;
-          final monthChange = appSettings.useLiveFirestore ? (monthlyNetIncome - expenditure) : null;
+          final monthChange = appSettings.useLiveFirestore ? monthlyNetIncome : null;
 
           return ListView(
             padding: const EdgeInsets.all(16),
@@ -1087,7 +1136,7 @@ class PropertyPage extends StatefulWidget {
 class _PropertyPageState extends State<PropertyPage> {
   String invoiceFilter = 'All';
 
-  String _money(num value) => '£${value.toStringAsFixed(0)}';
+  String _money(num value) => formatGbp(value);
 
   bool _isYearMatch(Invoice invoice, String year) {
     return invoice.date.contains(year) || invoice.ref.contains(year);
@@ -1186,6 +1235,15 @@ class _PropertyPageState extends State<PropertyPage> {
       ..sort((a, b) => a.weekNumber.compareTo(b.weekNumber));
     final finances = app.financeRecords.where((f) => f.propertyId == property.id).toList();
     final incomes = app.incomeRows.where((r) => r.propertyId == property.id).toList();
+    final rentReceiptsForProp = app.rentReceipts.where((r) => r.propertyId == property.id).toList()
+      ..sort((a, b) => b.dueDate.compareTo(a.dueDate));
+    final rentReceivedToDate =
+        rentReceiptsForProp.where((r) => r.isReceived).fold<double>(0, (s, r) => s + r.amount);
+    final lateRentCount = rentReceiptsForProp.where((r) => r.isLate).length;
+    final expensesForProp = app.expenses.where((e) => e.propertyId == property.id).toList()
+      ..sort((a, b) => b.date.compareTo(a.date));
+    final monthlyRepeatingExpenses =
+        expensesForProp.where((e) => e.isRepeating).fold<double>(0, (s, e) => s + e.amount);
     final policies = app.insuranceRecords.where((r) => r.propertyId == property.id).toList();
     final invoiceCostSum = inv.fold<double>(0, (sum, item) => sum + item.amount);
     final financePcmSum = finances.fold<double>(0, (s, f) => s + (f.monthlyPayment ?? 0));
@@ -1436,11 +1494,94 @@ class _PropertyPageState extends State<PropertyPage> {
           ]),
           ListView(padding: const EdgeInsets.all(16), children: [
             _KV(label: 'Current monthly net', value: _money(property.net)),
+            if (monthlyRepeatingExpenses > 0) ...[
+              _KV(label: 'Monthly expenses (repeating)', value: '-${_money(monthlyRepeatingExpenses)}'),
+              _KV(label: 'Net after monthly expenses', value: _money(property.net - monthlyRepeatingExpenses)),
+            ],
             _KV(label: 'Annual income', value: _money(projectedIncome)),
             _KV(label: 'Supplier costs (invoices)', value: _money(invoiceCostSum)),
             _KV(label: 'Loan / finance (pcm)', value: _money(financePcmSum)),
             _KV(label: 'Costs to date (incl. 12 mo finance)', value: _money(costsToDateCombined)),
+            if (property.hasRentSchedule) ...[
+              const SizedBox(height: 14),
+              const Text('RENT SCHEDULE', style: TextStyle(letterSpacing: 1, fontSize: 11, color: Color(0xFF6B7280))),
+              const SizedBox(height: 6),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${_money(property.rentAmount ?? 0)} · ${rentFrequencyLabelMobile(property.rentFrequency)}',
+                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        property.rentFrequency == 'monthly'
+                            ? 'Due on day ${property.rentDueDay ?? '-'} each month'
+                            : 'From ${property.rentStartDate ?? '-'}',
+                        style: const TextStyle(color: Color(0xFF6B7280)),
+                      ),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          _MiniStatPill(value: _money(rentReceivedToDate), label: 'rent received', color: AppColors.gold),
+                          _MiniStatPill(
+                            value: '$lateRentCount',
+                            label: 'late payments',
+                            color: lateRentCount > 0 ? Colors.orange : Colors.green,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              if (rentReceiptsForProp.isEmpty)
+                const Card(child: ListTile(title: Text('No rent recorded yet')))
+              else
+                ...rentReceiptsForProp.map(
+                  (r) => Card(
+                    child: ListTile(
+                      leading: Icon(
+                        r.isReceived ? Icons.check_circle_outline : Icons.schedule,
+                        color: r.isLate ? Colors.orange : (r.isReceived ? Colors.green : const Color(0xFF6B7280)),
+                      ),
+                      title: Text('Due ${r.dueDate} · ${_money(r.amount)}'),
+                      subtitle: Text(
+                        r.isReceived
+                            ? 'Received ${r.receivedDate ?? '-'}${r.isLate ? ' · late' : ''}'
+                            : 'Awaiting payment',
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+            if (expensesForProp.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              const Text('EXPENSES', style: TextStyle(letterSpacing: 1, fontSize: 11, color: Color(0xFF6B7280))),
+              const SizedBox(height: 6),
+              ...expensesForProp.map(
+                (e) => Card(
+                  child: ListTile(
+                    leading: Icon(e.isRepeating ? Icons.repeat : Icons.bolt_outlined, color: AppColors.crimson),
+                    title: Text(e.description),
+                    subtitle: Text(
+                      '${e.date}'
+                      '${e.category != null && e.category!.isNotEmpty ? ' · ${e.category}' : ''}'
+                      ' · ${e.isRepeating ? 'Repeating (monthly)' : 'One-off'}',
+                    ),
+                    trailing: Text('-${_money(e.amount)}', style: const TextStyle(fontWeight: FontWeight.w600)),
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 8),
+            const Text('INCOME ROWS', style: TextStyle(letterSpacing: 1, fontSize: 11, color: Color(0xFF6B7280))),
+            const SizedBox(height: 6),
             if (incomes.isEmpty)
               const Card(child: ListTile(title: Text('No income rows from admin yet')))
             else
@@ -1448,7 +1589,10 @@ class _PropertyPageState extends State<PropertyPage> {
                     (r) => Card(
                       child: ListTile(
                         title: Text('Period ${r.period}'),
-                        subtitle: Text('Income ${_money(r.incomeAmount)} · Costs ${_money(r.costAmount)}'),
+                        subtitle: Text(
+                          'Income ${_money(r.incomeAmount)} · Costs ${_money(r.costAmount)}'
+                          '${r.frequency != null && r.frequency!.isNotEmpty ? ' · ${incomeFrequencyLabelMobile(r.frequency)}' : ''}',
+                        ),
                       ),
                     ),
                   ),
@@ -2249,8 +2393,14 @@ class AccountPage extends StatelessWidget {
               const SizedBox(height: 10),
               _PanelCard(
                 child: ListTile(
+                  leading: const Icon(Icons.person_outline, color: AppColors.crimson),
                   title: const Text('Client'),
-                  subtitle: Text(app.companies.isEmpty ? '-' : app.companies.first.name),
+                  subtitle: Text(
+                    app.clientName.value.trim().isNotEmpty
+                        ? app.clientName.value
+                        : (app.companies.isEmpty ? '—' : app.companies.first.name),
+                    style: const TextStyle(fontWeight: FontWeight.w600, color: AppColors.text),
+                  ),
                 ),
               ),
               _PanelCard(
@@ -2285,6 +2435,94 @@ class AccountPage extends StatelessWidget {
   }
 }
 
+/// Subtle property + £ brand watermark for the splash / login / page backgrounds (feedback #8).
+/// Returns a non-Positioned painter so it fills a parent Stack with `StackFit.expand`.
+class _BrandWatermark extends StatelessWidget {
+  final Color tint;
+  final double opacity;
+  const _BrandWatermark({required this.tint, this.opacity = 1});
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: CustomPaint(
+        size: Size.infinite,
+        painter: _PropertyWatermarkPainter(tint: tint, opacity: opacity),
+      ),
+    );
+  }
+}
+
+class _PropertyWatermarkPainter extends CustomPainter {
+  final Color tint;
+  final double opacity;
+  _PropertyWatermarkPainter({required this.tint, required this.opacity});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final fill = Paint()
+      ..color = tint.withValues(alpha: 0.05 * opacity)
+      ..style = PaintingStyle.fill;
+    final stroke = Paint()
+      ..color = tint.withValues(alpha: 0.09 * opacity)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+
+    // Large, very faint £ glyph toward the lower-right for a subtle "pop".
+    final tp = TextPainter(
+      text: TextSpan(
+        text: '£',
+        style: TextStyle(
+          fontSize: size.width * 0.6,
+          fontWeight: FontWeight.w700,
+          color: tint.withValues(alpha: 0.05 * opacity),
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    tp.paint(canvas, Offset(size.width - tp.width * 0.82, size.height - tp.height * 0.84));
+
+    // Faint property skyline along the bottom.
+    final baseY = size.height;
+    final left = size.width * 0.05;
+    final buildings = <Rect>[
+      Rect.fromLTWH(left, baseY - 120, 68, 120),
+      Rect.fromLTWH(left + 78, baseY - 168, 60, 168),
+      Rect.fromLTWH(left + 146, baseY - 92, 54, 92),
+    ];
+    for (final b in buildings) {
+      canvas.drawRect(b, fill);
+      canvas.drawRect(b, stroke);
+      final cols = (b.width / 22).floor();
+      final rows = (b.height / 28).floor();
+      for (var r = 0; r < rows; r++) {
+        for (var c = 0; c < cols; c++) {
+          final wx = b.left + 9 + c * 22;
+          final wy = b.top + 12 + r * 28;
+          if (wx + 10 <= b.right && wy + 12 <= b.bottom) {
+            canvas.drawRect(Rect.fromLTWH(wx, wy, 10, 12), stroke);
+          }
+        }
+      }
+    }
+    // A pitched-roof house at the end of the skyline.
+    final hx = left + 210.0;
+    final house = Path()
+      ..moveTo(hx, baseY)
+      ..lineTo(hx, baseY - 66)
+      ..lineTo(hx + 34, baseY - 96)
+      ..lineTo(hx + 68, baseY - 66)
+      ..lineTo(hx + 68, baseY)
+      ..close();
+    canvas.drawPath(house, fill);
+    canvas.drawPath(house, stroke);
+  }
+
+  @override
+  bool shouldRepaint(covariant _PropertyWatermarkPainter oldDelegate) =>
+      oldDelegate.tint != tint || oldDelegate.opacity != opacity;
+}
+
 class _PageBackdrop extends StatelessWidget {
   final Widget child;
   const _PageBackdrop({required this.child});
@@ -2299,7 +2537,13 @@ class _PageBackdrop extends StatelessWidget {
           end: Alignment.bottomCenter,
         ),
       ),
-      child: child,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          const _BrandWatermark(tint: AppColors.crimson, opacity: 0.7),
+          child,
+        ],
+      ),
     );
   }
 }
