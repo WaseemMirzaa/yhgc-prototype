@@ -2988,6 +2988,8 @@ function AdminApp() {
                     status: payload.status,
                     clientId: payload.clientId,
                     companyId: payload.companyId,
+                    ...(payload.monthlyNet != null ? { monthlyNet: payload.monthlyNet } : {}),
+                    ...(payload.rentPatch ?? {}),
                   })
                   addNotification({
                     clientId: payload.clientId,
@@ -3471,12 +3473,17 @@ function AddPropertyFormCard({
     address: string
     propertyType: string
     status: PropertyStatus
+    monthlyNet?: number
+    rentPatch: Partial<Pick<Property, "rentAmount" | "rentFrequency" | "rentDueDay" | "rentStartDate">> | null
   }) => void
 }) {
   const [title, setTitle] = useState("")
   const [address, setAddress] = useState("")
   const [propertyType, setPropertyType] = useState("")
   const [status, setStatus] = useState<PropertyStatus>("in_construction")
+  const [monthlyNet, setMonthlyNet] = useState("")
+  const [rentDueDay, setRentDueDay] = useState("1")
+  const [rentStartDate, setRentStartDate] = useState("")
   const [formError, setFormError] = useState<string | null>(null)
   const selectedClientId = companies.find((c) => c.id === selectedCompanyId)?.clientId ?? ""
 
@@ -3494,6 +3501,24 @@ function AddPropertyFormCard({
           setFormError("Enter the property title, full address, and property type.")
           return
         }
+        const rmn = parseOptionalAmount(monthlyNet, "Monthly net (£)", true)
+        if (rmn.ok === false) {
+          setFormError(rmn.error)
+          return
+        }
+        const dueDayNum = Number(rentDueDay)
+        const start = rentStartDate.trim()
+        if (rmn.value != null && rmn.value > 0) {
+          if (!start) {
+            setFormError("Choose the first rent due date when monthly net is set.")
+            return
+          }
+          if (!Number.isFinite(dueDayNum) || dueDayNum < 1 || dueDayNum > 31) {
+            setFormError("Rent due day must be between 1 and 31.")
+            return
+          }
+        }
+        const rentPatch = rentSchedulePatchFromMonthlyNet(rmn.value, dueDayNum, start)
         setFormError(null)
         onSubmit({
           clientId: selectedClientId,
@@ -3502,10 +3527,15 @@ function AddPropertyFormCard({
           address: address.trim(),
           propertyType: propertyType.trim(),
           status,
+          monthlyNet: rmn.value,
+          rentPatch,
         })
         setTitle("")
         setAddress("")
         setPropertyType("")
+        setMonthlyNet("")
+        setRentDueDay("1")
+        setRentStartDate("")
       }}
     >
       {formError ? (
@@ -3549,6 +3579,62 @@ function AddPropertyFormCard({
           setFormError(null)
         }}
       />
+      <div className="mt-4 space-y-3 rounded-xl border border-yhgc-gold/30 bg-yhgc-gold/5 p-3">
+        <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">Rental income (optional)</p>
+        <label className="block text-sm">
+          <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-neutral-500">Monthly net (£)</span>
+          <input
+            value={monthlyNet}
+            onChange={(e) => {
+              setMonthlyNet(e.target.value)
+              setFormError(null)
+            }}
+            className="w-full rounded-md border border-neutral-300 px-3 py-2"
+            type="text"
+            inputMode="decimal"
+            autoComplete="off"
+            placeholder="e.g. 1350"
+          />
+        </label>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="block text-sm">
+            <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-neutral-500">
+              First rent due date (date receivable)
+            </span>
+            <input
+              value={rentStartDate}
+              onChange={(e) => {
+                const v = e.target.value
+                setRentStartDate(v)
+                const d = v.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/)
+                if (d) setRentDueDay(String(Number(d[3])))
+                setFormError(null)
+              }}
+              className="w-full rounded-md border border-neutral-300 px-3 py-2"
+              type="date"
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-neutral-500">Rent due day of month</span>
+            <input
+              value={rentDueDay}
+              onChange={(e) => {
+                setRentDueDay(e.target.value)
+                setFormError(null)
+              }}
+              className="w-full rounded-md border border-neutral-300 px-3 py-2"
+              type="number"
+              min={1}
+              max={31}
+              placeholder="e.g. 1"
+            />
+          </label>
+        </div>
+        <p className="text-xs text-neutral-500">
+          Set the monthly net and the date rent is received to start automatic <strong>Rent received</strong> prompts on
+          the property&apos;s Income tab. You can also add or change this later under <strong>Edit details</strong>.
+        </p>
+      </div>
       <button
         type="submit"
         disabled={persisting}
