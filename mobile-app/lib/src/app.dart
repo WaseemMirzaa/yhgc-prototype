@@ -44,6 +44,15 @@ String incomeFrequencyLabelMobile(String? value) {
   return rentFrequencyLabelMobile(value);
 }
 
+/// A recurring income row (monthly/weekly/fortnightly) defines the property's
+/// rent schedule, so its amount is realised through confirmed rent receipts.
+/// Counting it again as income would double-count, so portfolio income totals
+/// include only confirmed rent plus one-off (non-schedule) income rows.
+bool incomeRowDrivesRentSchedule(IncomeRow row) {
+  final f = row.frequency;
+  return f == 'monthly' || f == 'weekly' || f == 'fortnightly';
+}
+
 String _loanAmountPcmLine(FinanceRecord f, String Function(num) money) {
   final a = f.loanAmount;
   final m = f.monthlyPayment;
@@ -966,16 +975,19 @@ class DashboardPage extends StatelessWidget {
 
           final totalPortfolioValue = app.properties.fold<double>(0, (sum, p) => sum + p.value);
 
-          // Income (actuals): rent actually received + logged income rows.
+          // Income (actuals): rent actually received + one-off income rows.
+          // Recurring income rows define the rent schedule, so their amounts are
+          // realised through rent receipts — counting them again would double-count.
+          final manualIncomeRows = app.incomeRows.where((r) => !incomeRowDrivesRentSchedule(r));
           final rentReceived =
               app.rentReceipts.where((r) => r.isReceived).fold<double>(0, (sum, r) => sum + r.amount);
-          final incomeRowIncome = app.incomeRows.fold<double>(0, (sum, r) => sum + r.incomeAmount);
+          final incomeRowIncome = manualIncomeRows.fold<double>(0, (sum, r) => sum + r.incomeAmount);
           final totalIncome = rentReceived + incomeRowIncome;
 
-          // Expenditure: supplier invoices + expenses (one-off + repeating) + logged operating costs.
+          // Expenditure: supplier invoices + expenses (one-off + repeating) + one-off operating costs.
           final invoicesTotal = app.invoices.fold<double>(0, (sum, i) => sum + i.amount);
           final expensesTotal = app.expenses.fold<double>(0, (sum, e) => sum + e.amount);
-          final incomeRowCosts = app.incomeRows.fold<double>(0, (sum, r) => sum + r.costAmount);
+          final incomeRowCosts = manualIncomeRows.fold<double>(0, (sum, r) => sum + r.costAmount);
           final expenditure = invoicesTotal + expensesTotal + incomeRowCosts;
 
           // Net income = what came in minus what went out. Rent received raises it; expenses lower it.
