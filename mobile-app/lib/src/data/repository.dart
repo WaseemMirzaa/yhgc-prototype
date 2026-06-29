@@ -428,6 +428,7 @@ List<IncomeRow> _fbParseIncome(Map<String, dynamic> data) {
           incomeAmount: ((item['incomeAmount'] as num?) ?? 0).toDouble(),
           costAmount: ((item['costAmount'] as num?) ?? 0).toDouble(),
           frequency: item['frequency']?.toString(),
+          anchorDate: item['anchorDate']?.toString(),
         ),
       )
       .toList();

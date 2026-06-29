@@ -115,10 +115,13 @@ export interface FinanceRecord {
 export interface IncomeRow {
   id: Id
   propertyId: Id
+  /** Ledger month (YYYY-MM) or specific date (YYYY-MM-DD) for sorting/display. */
   period: string
   incomeAmount: number
   costAmount: number
   frequency?: IncomeFrequency
+  /** First due date (recurring) or the one-off payment date. */
+  anchorDate?: ISODate
 }
 
 /** A confirmed (or due) rent payment for one scheduled occurrence. */
@@ -186,6 +189,7 @@ export interface NotificationLog {
     | "insurance_14"
     | "construction_complete"
     | "new_property_added"
+    | "rent_due"
   title: string
   body: string
   createdAt: ISODateTime

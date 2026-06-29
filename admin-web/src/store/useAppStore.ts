@@ -19,6 +19,11 @@ import type {
   Property,
   RentReceipt,
 } from "../types/models"
+import {
+  propertyIncomePatchFromReceipts,
+  snapshotWithSyncedPropertyIncome,
+  todayISODate,
+} from "../utils/rentTracking"
 
 export type ActionNotice = { kind: "success" | "error"; message: string } | null
 
@@ -367,7 +372,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   updateProperty: (id, patch) => {
     const current = get().snapshot
     if (!current) return
-    const properties = current.properties.map((item) => (item.id === id ? { ...item, ...patch } : item))
+    const properties = current.properties.map((item) => {
+      if (item.id !== id) return item
+      const merged = { ...item, ...patch }
+      return { ...merged, ...propertyIncomePatchFromReceipts(merged, current.rentReceipts) }
+    })
     set({
       snapshot: { ...current, properties, updatedAt: now() },
       actionNotice: { kind: "success", message: "Property updated." },
@@ -579,7 +588,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({
         actionNotice: {
           kind: "error",
-          message: "Please choose a month and enter valid income and cost amounts.",
+          message: "Please choose a date or period and enter valid income and cost amounts.",
         },
       })
       return
@@ -611,7 +620,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({
         actionNotice: {
           kind: "error",
-          message: "Please choose a month and enter valid income and cost amounts.",
+          message: "Please choose a date or period and enter valid income and cost amounts.",
         },
       })
       return
@@ -683,27 +692,38 @@ export const useAppStore = create<AppState>((set, get) => ({
       set({ actionNotice: { kind: "error", message: "Enter the rent amount received (greater than zero)." } })
       return
     }
-    const next: RentReceipt = { id: uuid(), ...payload }
+    const next: RentReceipt = {
+      id: uuid(),
+      ...payload,
+      receivedDate: payload.receivedDate?.trim() || todayISODate(),
+    }
+    const snapshot = snapshotWithSyncedPropertyIncome({
+      ...current,
+      rentReceipts: [next, ...current.rentReceipts],
+    })
     set({
-      snapshot: { ...current, rentReceipts: [next, ...current.rentReceipts], updatedAt: now() },
-      actionNotice: { kind: "success", message: "Rent recorded against this property." },
+      snapshot: { ...snapshot, updatedAt: now() },
+      actionNotice: { kind: "success", message: "Rent recorded — property income updated." },
     })
   },
   updateRentReceipt: (id, patch) => {
     const current = get().snapshot
     if (!current) return
     const rentReceipts = current.rentReceipts.map((item) => (item.id === id ? { ...item, ...patch } : item))
+    const snapshot = snapshotWithSyncedPropertyIncome({ ...current, rentReceipts })
     set({
-      snapshot: { ...current, rentReceipts, updatedAt: now() },
-      actionNotice: { kind: "success", message: "Rent payment updated." },
+      snapshot: { ...snapshot, updatedAt: now() },
+      actionNotice: { kind: "success", message: "Rent payment updated — property income recalculated." },
     })
   },
   deleteRentReceipt: (id) => {
     const current = get().snapshot
     if (!current) return
+    const rentReceipts = current.rentReceipts.filter((r) => r.id !== id)
+    const snapshot = snapshotWithSyncedPropertyIncome({ ...current, rentReceipts })
     set({
-      snapshot: { ...current, rentReceipts: current.rentReceipts.filter((r) => r.id !== id), updatedAt: now() },
-      actionNotice: { kind: "success", message: "Rent payment removed." },
+      snapshot: { ...snapshot, updatedAt: now() },
+      actionNotice: { kind: "success", message: "Rent payment removed — property income recalculated." },
     })
   },
   addInsuranceRecord: (payload) => {

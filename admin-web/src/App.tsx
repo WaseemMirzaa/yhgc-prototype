@@ -30,6 +30,21 @@ import type {
   RentReceipt,
 } from "./types/models"
 import { PROPERTY_TYPE_OPTIONS } from "./types/models"
+import {
+  defaultPropertyTab,
+  hasRentSchedule,
+  isRentLate,
+  pendingRentDueDates,
+  portfolioRentMetrics,
+  portfolioRentMetricsForClient,
+  portfolioRentMetricsForCompany,
+  rentDueDatesUpTo,
+  rentSchedulePatchFromMonthlyNet,
+  todayISODate,
+  totalRentReceivedForProperty,
+  parseISODateLocal,
+  type PortfolioRentMetrics,
+} from "./utils/rentTracking"
 
 const sections = [
   "dashboard",
@@ -186,6 +201,10 @@ function isPropertyDetailsValuationPatchNoop(
       | "incomeToDate"
       | "costToDate"
       | "netPosition"
+      | "rentAmount"
+      | "rentFrequency"
+      | "rentDueDay"
+      | "rentStartDate"
     >
   >,
 ): boolean {
@@ -210,7 +229,11 @@ function isPropertyDetailsValuationPatchNoop(
     strEq(patch.managingAgent, property.managingAgent) &&
     numEq(patch.incomeToDate, property.incomeToDate) &&
     numEq(patch.costToDate, property.costToDate) &&
-    numEq(patch.netPosition, property.netPosition)
+    numEq(patch.netPosition, property.netPosition) &&
+    numEq(patch.rentAmount, property.rentAmount) &&
+    strEq(patch.rentFrequency, property.rentFrequency) &&
+    numEq(patch.rentDueDay, property.rentDueDay) &&
+    dateEq(patch.rentStartDate, property.rentStartDate)
   )
 }
 
@@ -1068,6 +1091,7 @@ function AdminApp() {
     persisting,
     actionNotice,
     clearActionNotice,
+    setActionNotice,
     addClient,
     addCompany,
     addProperty,
@@ -1138,17 +1162,47 @@ function AdminApp() {
     return () => window.clearTimeout(timer)
   }, [actionNotice, clearActionNotice])
 
+  const rentDueAlertShownRef = useRef(false)
+  useEffect(() => {
+    if (!snapshot || !isAuthenticated || rentDueAlertShownRef.current) return
+    const pending = portfolioRentMetrics(snapshot).pendingDueCount
+    if (pending <= 0) return
+    rentDueAlertShownRef.current = true
+    setActionNotice({
+      kind: "success",
+      message: `${pending} rent payment${pending === 1 ? "" : "s"} due to confirm — open a property’s Income tab or use the dashboard list below.`,
+    })
+  }, [snapshot, isAuthenticated, setActionNotice])
+
   const stats = useMemo(() => {
     if (!snapshot)
-      return { clients: 0, companies: 0, properties: 0, invoices: 0, notifications: 0 }
+      return { clients: 0, companies: 0, properties: 0, invoices: 0, notifications: 0, rentDuePending: 0, rentReceivedTotal: 0 }
+    const rent = portfolioRentMetrics(snapshot)
     return {
       clients: snapshot.clients.length,
       companies: snapshot.companies.length,
       properties: snapshot.properties.length,
       invoices: snapshot.invoices.length,
       notifications: snapshot.notifications.length,
+      rentDuePending: rent.pendingDueCount,
+      rentReceivedTotal: rent.totalRentReceived,
     }
   }, [snapshot])
+
+  const rentPortfolio = useMemo(() => (snapshot ? portfolioRentMetrics(snapshot) : null), [snapshot])
+
+  const openPropertyDetail = useCallback(
+    (propertyId: string, opts?: { clientId?: string | null; companyId?: string | null }) => {
+      if (!snapshot) return
+      const p = snapshot.properties.find((x) => x.id === propertyId)
+      if (!p) return
+      setDetailClientId(opts?.clientId === undefined ? null : opts.clientId)
+      setDetailCompanyId(opts?.companyId === undefined ? null : opts.companyId)
+      setDetailPropertyTab(defaultPropertyTab(p, snapshot.rentReceipts))
+      setDetailPropertyId(propertyId)
+    },
+    [snapshot],
+  )
 
   const detailProperty = useMemo(
     () => (detailPropertyId ? snapshot?.properties.find((p) => p.id === detailPropertyId) : undefined),
@@ -1169,6 +1223,21 @@ function AdminApp() {
   const detailClient = useMemo(
     () => (detailClientId ? snapshot?.clients.find((c) => c.id === detailClientId) : undefined),
     [detailClientId, snapshot],
+  )
+  const detailClientRent = useMemo(
+    () => (snapshot && detailClientId ? portfolioRentMetricsForClient(snapshot, detailClientId) : null),
+    [snapshot, detailClientId],
+  )
+  const detailCompanyRent = useMemo(
+    () => (snapshot && detailCompanyId ? portfolioRentMetricsForCompany(snapshot, detailCompanyId) : null),
+    [snapshot, detailCompanyId],
+  )
+  const detailPropertyPendingRent = useMemo(
+    () =>
+      snapshot && detailProperty
+        ? pendingRentDueDates(detailProperty, snapshot.rentReceipts)
+        : [],
+    [snapshot, detailProperty],
   )
   const editingClient = useMemo(
     () => (editingClientId ? snapshot?.clients.find((c) => c.id === editingClientId) : undefined),
@@ -1601,6 +1670,25 @@ function AdminApp() {
                 </div>
               </div>
 
+              {detailPropertyPendingRent.length > 0 && detailPropertyTab !== "income" ? (
+                <div className="rounded-lg border border-amber-200 bg-amber-50/80 px-4 py-3">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-sm text-amber-950">
+                      <strong>{detailPropertyPendingRent.length}</strong> rent{" "}
+                      {detailPropertyPendingRent.length === 1 ? "period" : "periods"} due for confirmation on this
+                      property.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setDetailPropertyTab("income")}
+                      className="rounded-lg bg-yhgc-crimson px-3 py-1.5 text-xs font-medium text-white hover:opacity-90"
+                    >
+                      Go to Income
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
               <div>
                 <h3 className="text-sm font-semibold text-neutral-900">Overview</h3>
                 <p className="mt-1 text-xs text-neutral-500">
@@ -1804,10 +1892,18 @@ function AdminApp() {
                     }}
                     onAddIncomeRow={(payload) => {
                       addIncomeRow(payload)
+                      const rentPatch = rentSchedulePatchFromIncomeRow(payload)
+                      if (rentPatch) updateProperty(detailProperty.id, rentPatch)
                       void persist()
                     }}
                     onUpdateIncomeRow={(id, patch) => {
+                      const existing = snapshot.incomeRows.find((r) => r.id === id)
                       updateIncomeRow(id, patch)
+                      const merged = existing ? { ...existing, ...patch } : null
+                      if (merged) {
+                        const rentPatch = rentSchedulePatchFromIncomeRow(merged)
+                        if (rentPatch) updateProperty(detailProperty.id, rentPatch)
+                      }
                       void persist()
                     }}
                     onAddInvoice={(payload) => {
@@ -1914,6 +2010,17 @@ function AdminApp() {
                 <div className="rounded-lg border border-neutral-200 bg-white p-3">Client ID: {detailCompany.clientId}</div>
                 <div className="rounded-lg border border-neutral-200 bg-white p-3">Updated: {detailCompany.lastUpdatedAt}</div>
               </div>
+              {detailCompanyRent ? (
+                <RentScopeSummary
+                  metrics={detailCompanyRent}
+                  onOpenProperty={(propertyId) =>
+                    openPropertyDetail(propertyId, {
+                      companyId: detailCompany.id,
+                      clientId: detailCompany.clientId,
+                    })
+                  }
+                />
+              ) : null}
               <div>
                 <h3 className="text-lg font-semibold">Properties</h3>
                 <div className="mt-3 grid gap-3">
@@ -1926,10 +2033,7 @@ function AdminApp() {
                         <div className="mt-3 flex gap-2">
                           <button
                             type="button"
-                            onClick={() => {
-                              setDetailPropertyTab("construction")
-                              setDetailPropertyId(p.id)
-                            }}
+                            onClick={() => openPropertyDetail(p.id, { companyId: detailCompany.id, clientId: detailCompany.clientId })}
                             className="rounded-md border border-neutral-300 px-3 py-1.5 text-xs font-medium text-neutral-800"
                           >
                             View
@@ -2027,6 +2131,18 @@ function AdminApp() {
                 <div className="rounded-lg border border-neutral-200 bg-white p-3">Status: {detailClient.status}</div>
                 <div className="rounded-lg border border-neutral-200 bg-white p-3">Login code: {detailClient.loginCode}</div>
               </div>
+              {detailClientRent ? (
+                <RentScopeSummary
+                  metrics={detailClientRent}
+                  onOpenProperty={(propertyId) => {
+                    const p = snapshot.properties.find((x) => x.id === propertyId)
+                    openPropertyDetail(propertyId, {
+                      clientId: detailClient.id,
+                      companyId: p?.companyId ?? null,
+                    })
+                  }}
+                />
+              ) : null}
               <div>
                 <h3 className="text-lg font-semibold">Companies</h3>
                 <div className="mt-3 grid gap-3">
@@ -2079,10 +2195,9 @@ function AdminApp() {
                         <div className="mt-3 flex gap-2">
                           <button
                             type="button"
-                            onClick={() => {
-                              setDetailPropertyTab("construction")
-                              setDetailPropertyId(p.id)
-                            }}
+                            onClick={() =>
+                              openPropertyDetail(p.id, { clientId: detailClient.id, companyId: p.companyId })
+                            }
                             className="rounded-md border border-neutral-300 px-3 py-1.5 text-xs font-medium text-neutral-800"
                           >
                             View
@@ -2128,6 +2243,35 @@ function AdminApp() {
                 <StatCard label="Invoices" value={stats.invoices} />
                 <StatCard label="Notifications" value={stats.notifications} />
               </div>
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <StatCard label="Rent due to confirm" value={stats.rentDuePending} />
+                <StatCard label="Rent received (portfolio)" value={formatGbpAmount(stats.rentReceivedTotal)} />
+              </div>
+              {rentPortfolio && rentPortfolio.propertiesWithPending.length > 0 ? (
+                <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/80 p-4 shadow-sm">
+                  <h3 className="text-sm font-semibold text-amber-950">Rent awaiting confirmation</h3>
+                  <p className="mt-1 text-xs text-amber-900/90">
+                    Open a property and use <strong>Income</strong> → <strong>Rent received</strong> to record payments.
+                  </p>
+                  <ul className="mt-3 divide-y divide-amber-100 rounded-lg border border-amber-100 bg-white/70">
+                    {rentPortfolio.propertiesWithPending.map((row) => (
+                      <li key={row.propertyId} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
+                        <span>
+                          <strong>{row.title}</strong>
+                          <span className="ml-2 text-amber-800">{row.pendingCount} due</span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => openPropertyDetail(row.propertyId)}
+                          className="rounded-lg bg-yhgc-crimson px-3 py-1.5 text-xs font-medium text-white hover:opacity-90"
+                        >
+                          Confirm rent
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
               <div className="mt-4 grid gap-4 md:grid-cols-3">
                 <ActionCard
                   title="Onboard Client"
@@ -2337,12 +2481,7 @@ function AdminApp() {
                     <div className="mt-3 flex gap-2">
                       <button
                         type="button"
-                        onClick={() => {
-                          setDetailClientId(null)
-                          setDetailCompanyId(null)
-                          setDetailPropertyTab("construction")
-                          setDetailPropertyId(item.id)
-                        }}
+                        onClick={() => openPropertyDetail(item.id)}
                         className="rounded-md border border-neutral-300 px-3 py-1.5 text-xs font-medium text-neutral-800"
                       >
                         View
@@ -3042,7 +3181,7 @@ function AccountantReadonlyPortal({
   )
 }
 
-function StatCard({ label, value }: { label: string; value: number }) {
+function StatCard({ label, value }: { label: string; value: number | string }) {
   return (
     <div className="rounded-2xl border border-neutral-200 bg-white/95 p-4 shadow-sm">
       <div className="h-1 w-12 rounded-full bg-yhgc-gold" />
@@ -4451,18 +4590,20 @@ function PropertyHeroImagePicker({
 }
 
 function PropertyDetailsFieldsForm({ property, onSave }: { property: Property; onSave: (patch: Partial<Omit<Property, "id">>) => void }) {
+  const rentReceipts = useAppStore((s) => s.snapshot?.rentReceipts ?? [])
+  const liveIncome = totalRentReceivedForProperty(property.id, rentReceipts)
   const [heroImageUrl, setHeroImageUrl] = useState("")
   const [purchasePrice, setPurchasePrice] = useState("")
   const [purchaseDate, setPurchaseDate] = useState("")
   const [currentValue, setCurrentValue] = useState("")
   const [monthlyNet, setMonthlyNet] = useState("")
+  const [rentDueDay, setRentDueDay] = useState("1")
+  const [rentStartDate, setRentStartDate] = useState("")
   const [refinanceDate, setRefinanceDate] = useState("")
   const [insuranceRenewalDate, setInsuranceRenewalDate] = useState("")
   const [tenancyStatus, setTenancyStatus] = useState("")
   const [managingAgent, setManagingAgent] = useState("")
-  const [incomeToDate, setIncomeToDate] = useState("")
   const [costToDate, setCostToDate] = useState("")
-  const [netPosition, setNetPosition] = useState("")
   const [formError, setFormError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -4471,13 +4612,13 @@ function PropertyDetailsFieldsForm({ property, onSave }: { property: Property; o
     setPurchaseDate(toHtmlDateInputValue(property.purchaseDate))
     setCurrentValue(property.currentValue != null ? String(property.currentValue) : "")
     setMonthlyNet(property.monthlyNet != null ? String(property.monthlyNet) : "")
+    setRentDueDay(property.rentDueDay != null ? String(property.rentDueDay) : "1")
+    setRentStartDate(toHtmlDateInputValue(property.rentStartDate))
     setRefinanceDate(toHtmlDateInputValue(property.refinanceDate))
     setInsuranceRenewalDate(toHtmlDateInputValue(property.insuranceRenewalDate))
     setTenancyStatus(property.tenancyStatus ?? "")
     setManagingAgent(property.managingAgent ?? "")
-    setIncomeToDate(property.incomeToDate != null ? String(property.incomeToDate) : "")
     setCostToDate(property.costToDate != null ? String(property.costToDate) : "")
-    setNetPosition(property.netPosition != null ? String(property.netPosition) : "")
     setFormError(null)
   }, [
     property.id,
@@ -4486,13 +4627,13 @@ function PropertyDetailsFieldsForm({ property, onSave }: { property: Property; o
     property.purchaseDate,
     property.currentValue,
     property.monthlyNet,
+    property.rentDueDay,
+    property.rentStartDate,
     property.refinanceDate,
     property.insuranceRenewalDate,
     property.tenancyStatus,
     property.managingAgent,
-    property.incomeToDate,
     property.costToDate,
-    property.netPosition,
   ])
 
   const submit = (event: FormEvent) => {
@@ -4514,21 +4655,26 @@ function PropertyDetailsFieldsForm({ property, onSave }: { property: Property; o
       setFormError(rmn.error)
       return
     }
-    const rit = parseOptionalAmount(incomeToDate, "Income to date (£)", false)
-    if (rit.ok === false) {
-      setFormError(rit.error)
-      return
-    }
     const rct = parseOptionalAmount(costToDate, "Costs to date (£)", false)
     if (rct.ok === false) {
       setFormError(rct.error)
       return
     }
-    const rnp = parseOptionalAmount(netPosition, "Net position (£)", true)
-    if (rnp.ok === false) {
-      setFormError(rnp.error)
-      return
+
+    const dueDayNum = Number(rentDueDay)
+    const start = rentStartDate.trim()
+    if (rmn.value != null && rmn.value > 0) {
+      if (!start) {
+        setFormError("Choose the first rent due date when monthly net is set.")
+        return
+      }
+      if (!Number.isFinite(dueDayNum) || dueDayNum < 1 || dueDayNum > 31) {
+        setFormError("Rent due day must be between 1 and 31.")
+        return
+      }
     }
+
+    const rentPatch = rentSchedulePatchFromMonthlyNet(rmn.value, dueDayNum, start)
 
     const patch = {
       heroImageUrl: optionalTrimmed(heroImageUrl),
@@ -4540,9 +4686,8 @@ function PropertyDetailsFieldsForm({ property, onSave }: { property: Property; o
       insuranceRenewalDate: optionalTrimmed(insuranceRenewalDate),
       tenancyStatus: optionalTrimmed(tenancyStatus),
       managingAgent: optionalTrimmed(managingAgent),
-      incomeToDate: rit.value,
       costToDate: rct.value,
-      netPosition: rnp.value,
+      ...(rentPatch ?? {}),
     }
     if (isPropertyDetailsValuationPatchNoop(property, patch)) {
       setFormError("Nothing to save — add or change a value first, or use Close.")
@@ -4551,11 +4696,13 @@ function PropertyDetailsFieldsForm({ property, onSave }: { property: Property; o
     onSave(patch)
   }
 
+  const computedNet = liveIncome - (Number(costToDate) || property.costToDate || 0)
+
   return (
     <form key={property.id} noValidate onSubmit={submit} className="rounded-2xl border border-yhgc-gold/20 bg-white p-4 shadow-sm">
       <p className="mb-3 text-sm font-semibold">Details &amp; valuation</p>
       <p className="mb-3 text-xs text-neutral-600">
-        Click <strong>Save changes</strong> to apply. The read-only summary above updates after you save.
+        Monthly net plus rent due date starts automatic <strong>Rent received</strong> tracking on the Income tab.
       </p>
       {formError ? (
         <p role="alert" className={`${adminFormAlert} mb-3`}>
@@ -4624,7 +4771,41 @@ function PropertyDetailsFieldsForm({ property, onSave }: { property: Property; o
             type="text"
             inputMode="decimal"
             autoComplete="off"
+            placeholder="e.g. 1350"
           />
+        </label>
+        <label className="text-sm">
+          <span className={adminLabel}>Rent due day of month</span>
+          <input
+            value={rentDueDay}
+            onChange={(e) => {
+              setRentDueDay(e.target.value)
+              setFormError(null)
+            }}
+            className={adminFieldInput}
+            type="number"
+            min={1}
+            max={31}
+            placeholder="e.g. 1"
+          />
+        </label>
+        <label className="text-sm md:col-span-2">
+          <span className={adminLabel}>First rent due date (date receivable)</span>
+          <input
+            value={rentStartDate}
+            onChange={(e) => {
+              const v = e.target.value
+              setRentStartDate(v)
+              const d = v.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/)
+              if (d) setRentDueDay(String(Number(d[3])))
+              setFormError(null)
+            }}
+            className={adminFieldInput}
+            type="date"
+          />
+          <span className="mt-1 block text-xs text-neutral-500">
+            e.g. 1 July each year — saves with monthly net to enable <strong>Rent received</strong> prompts on the Income tab.
+          </span>
         </label>
         <label className="text-sm">
           <span className={adminLabel}>Refinance date</span>
@@ -4673,20 +4854,6 @@ function PropertyDetailsFieldsForm({ property, onSave }: { property: Property; o
           />
         </label>
         <label className="text-sm">
-          <span className={adminLabel}>Income to date (£)</span>
-          <input
-            value={incomeToDate}
-            onChange={(e) => {
-              setIncomeToDate(e.target.value)
-              setFormError(null)
-            }}
-            className={adminFieldInput}
-            type="text"
-            inputMode="decimal"
-            autoComplete="off"
-          />
-        </label>
-        <label className="text-sm">
           <span className={adminLabel}>Costs to date (£)</span>
           <input
             value={costToDate}
@@ -4700,20 +4867,13 @@ function PropertyDetailsFieldsForm({ property, onSave }: { property: Property; o
             autoComplete="off"
           />
         </label>
-        <label className="text-sm md:col-span-2">
-          <span className={adminLabel}>Net position (£)</span>
-          <input
-            value={netPosition}
-            onChange={(e) => {
-              setNetPosition(e.target.value)
-              setFormError(null)
-            }}
-            className={adminFieldInput}
-            type="text"
-            inputMode="decimal"
-            autoComplete="off"
-          />
-        </label>
+        <div className="text-sm md:col-span-2 rounded-lg border border-neutral-200 bg-neutral-50/90 p-3">
+          <p className="text-xs font-medium uppercase text-neutral-500">Income to date (from rent received)</p>
+          <p className="mt-1 font-semibold text-neutral-900">{formatGbpAmount(liveIncome)}</p>
+          <p className="mt-2 text-xs font-medium uppercase text-neutral-500">Net position (auto)</p>
+          <p className="mt-1 font-semibold text-neutral-900">{formatGbpAmount(computedNet)}</p>
+          <p className="mt-2 text-xs text-neutral-500">Updated when you confirm rent on the Income tab.</p>
+        </div>
       </div>
       <button type="submit" className="mt-4 w-full rounded-xl bg-yhgc-crimson px-4 py-2.5 text-sm font-medium text-white shadow hover:opacity-95">
         Save changes
@@ -5124,11 +5284,57 @@ const INCOME_FREQUENCY_OPTIONS: { value: IncomeFrequency; label: string }[] = [
   { value: "monthly", label: "Monthly" },
   { value: "weekly", label: "Weekly" },
   { value: "fortnightly", label: "Fortnightly" },
-  { value: "one_off", label: "One-off / specific date" },
+  { value: "one_off", label: "One-off (specific date)" },
 ]
 
 function incomeFrequencyLabel(value: IncomeFrequency | undefined): string {
   return INCOME_FREQUENCY_OPTIONS.find((o) => o.value === value)?.label ?? "Monthly"
+}
+
+function incomeRowAnchorFromRow(row: IncomeRow): string {
+  if (row.anchorDate?.trim()) return toHtmlDateInputValue(row.anchorDate)
+  const p = row.period.trim()
+  if (/^\d{4}-\d{2}-\d{2}$/.test(p)) return p
+  if (/^\d{4}-\d{2}$/.test(p)) return `${p}-01`
+  return ""
+}
+
+function deriveIncomeRowPeriod(frequency: IncomeFrequency, anchorDate: string): string {
+  const d = anchorDate.trim()
+  if (!d) return ""
+  if (frequency === "monthly") return d.slice(0, 7)
+  return d
+}
+
+function formatIncomeRowPeriod(row: IncomeRow): string {
+  const anchor = row.anchorDate?.trim() || incomeRowAnchorFromRow(row)
+  if (row.frequency === "one_off" && anchor) return anchor
+  if (row.frequency === "monthly" && anchor) {
+    const day = parseISODateLocal(anchor)?.getDate()
+    const month = anchor.slice(0, 7)
+    return day ? `${month} · due day ${day}` : month
+  }
+  if ((row.frequency === "weekly" || row.frequency === "fortnightly") && anchor) {
+    return `${anchor} · ${incomeFrequencyLabel(row.frequency)}`
+  }
+  return row.period || "—"
+}
+
+/** Recurring income rows drive the rent schedule so Rent received prompts appear automatically. */
+function rentSchedulePatchFromIncomeRow(
+  payload: Pick<IncomeRow, "frequency" | "incomeAmount" | "anchorDate">,
+): Partial<Pick<Property, "rentAmount" | "rentFrequency" | "rentDueDay" | "rentStartDate">> | null {
+  const freq = payload.frequency
+  const anchor = payload.anchorDate?.trim()
+  if (!freq || freq === "one_off" || !anchor || !(payload.incomeAmount > 0)) return null
+  const start = parseISODateLocal(anchor)
+  if (!start) return null
+  return {
+    rentAmount: payload.incomeAmount,
+    rentFrequency: freq,
+    rentStartDate: anchor,
+    rentDueDay: freq === "monthly" ? start.getDate() : undefined,
+  }
 }
 
 function IncomeRowForm({
@@ -5137,29 +5343,42 @@ function IncomeRowForm({
   submitLabel = "Save income row",
 }: {
   row: IncomeRow
-  onSubmit: (patch: Partial<Omit<IncomeRow, "id" | "propertyId">>) => void
+  onSubmit: (patch: Omit<IncomeRow, "id" | "propertyId">) => void
   submitLabel?: string
 }) {
-  const [period, setPeriod] = useState("")
-  const [frequency, setFrequency] = useState<IncomeFrequency>("monthly")
-  const [incomeAmount, setIncomeAmount] = useState("")
-  const [costAmount, setCostAmount] = useState("")
+  const [frequency, setFrequency] = useState<IncomeFrequency>(row.frequency ?? "monthly")
+  const [anchorDate, setAnchorDate] = useState(() => incomeRowAnchorFromRow(row) || todayISODate())
+  const [incomeAmount, setIncomeAmount] = useState(row.incomeAmount ? String(row.incomeAmount) : "")
+  const [costAmount, setCostAmount] = useState(row.costAmount ? String(row.costAmount) : "")
   const [formError, setFormError] = useState<string | null>(null)
 
   useEffect(() => {
-    setPeriod(row.period)
     setFrequency(row.frequency ?? "monthly")
-    setIncomeAmount(String(row.incomeAmount))
-    setCostAmount(String(row.costAmount))
-  }, [row.id, row.period, row.frequency, row.incomeAmount, row.costAmount])
+    setAnchorDate(incomeRowAnchorFromRow(row) || todayISODate())
+    setIncomeAmount(row.incomeAmount ? String(row.incomeAmount) : "")
+    setCostAmount(row.costAmount ? String(row.costAmount) : "")
+  }, [row.id, row.frequency, row.anchorDate, row.period, row.incomeAmount, row.costAmount])
+
+  const dateFieldLabel =
+    frequency === "one_off"
+      ? "Specific date"
+      : frequency === "monthly"
+        ? "First due date"
+        : "First / anchor date"
 
   const submit = (event: FormEvent) => {
     event.preventDefault()
     setFormError(null)
     const inc = Number(incomeAmount)
     const cost = Number(costAmount)
-    if (!period.trim()) {
-      setFormError("Choose the month for this row.")
+    const anchor = anchorDate.trim()
+    if (!anchor) {
+      setFormError(`Choose ${dateFieldLabel.toLowerCase()}.`)
+      return
+    }
+    const period = deriveIncomeRowPeriod(frequency, anchor)
+    if (!period) {
+      setFormError("Choose a valid date.")
       return
     }
     if (!Number.isFinite(inc)) {
@@ -5174,7 +5393,7 @@ function IncomeRowForm({
       setFormError("Income and costs must each be a non-zero amount (not £0).")
       return
     }
-    onSubmit({ period: period.trim(), frequency, incomeAmount: inc, costAmount: cost })
+    onSubmit({ period, frequency, anchorDate: anchor, incomeAmount: inc, costAmount: cost })
   }
 
   return (
@@ -5184,20 +5403,14 @@ function IncomeRowForm({
           {formError}
         </p>
       ) : null}
+      {frequency !== "one_off" ? (
+        <p className="rounded-lg border border-yhgc-gold/30 bg-yhgc-gold/5 px-3 py-2 text-xs text-neutral-700">
+          <strong>Monthly, weekly, and fortnightly</strong> rows update this property&apos;s rent schedule. Use{" "}
+          <strong>Rent received</strong> above to confirm each payment as it arrives.
+        </p>
+      ) : null}
       <div className="grid gap-3 sm:grid-cols-2">
-        <label className="text-sm">
-          <span className={adminLabel}>Period</span>
-          <input
-            value={period}
-            onChange={(e) => {
-              setPeriod(e.target.value)
-              setFormError(null)
-            }}
-            className={adminFieldInput}
-            type="month"
-          />
-        </label>
-        <label className="text-sm">
+        <label className="text-sm sm:col-span-2">
           <span className={adminLabel}>Frequency</span>
           <select
             value={frequency}
@@ -5214,6 +5427,29 @@ function IncomeRowForm({
             ))}
           </select>
         </label>
+        <label className="text-sm sm:col-span-2">
+          <span className={adminLabel}>{dateFieldLabel}</span>
+          <input
+            value={anchorDate}
+            onChange={(e) => {
+              setAnchorDate(e.target.value)
+              setFormError(null)
+            }}
+            className={adminFieldInput}
+            type="date"
+          />
+          {frequency === "monthly" ? (
+            <span className="mt-1 block text-xs text-neutral-500">
+              Rent is due on this day each month (e.g. pick 1 July for the 1st of every month).
+            </span>
+          ) : frequency === "one_off" ? (
+            <span className="mt-1 block text-xs text-neutral-500">Single payment on this date only.</span>
+          ) : (
+            <span className="mt-1 block text-xs text-neutral-500">
+              Repeats every {frequency === "weekly" ? "week" : "two weeks"} from this date.
+            </span>
+          )}
+        </label>
         <label className="text-sm">
           <span className={adminLabel}>Income (£)</span>
           <input
@@ -5225,6 +5461,7 @@ function IncomeRowForm({
             className={adminFieldInput}
             type="number"
             step="0.01"
+            placeholder="e.g. 1350"
           />
         </label>
         <label className="text-sm">
@@ -5238,6 +5475,7 @@ function IncomeRowForm({
             className={adminFieldInput}
             type="number"
             step="0.01"
+            placeholder="e.g. 200"
           />
         </label>
       </div>
@@ -5530,10 +5768,17 @@ function ConstructionWeekLogViewPanel({
 }
 
 function IncomeRowReadOnlyDetails({ row }: { row: IncomeRow }) {
+  const anchor = row.anchorDate?.trim() || incomeRowAnchorFromRow(row)
   return (
     <dl className="grid gap-2 text-sm sm:grid-cols-[minmax(0,10rem)_1fr]">
-      <dt className="text-neutral-500">Period</dt>
-      <dd className="font-medium text-neutral-900">{row.period}</dd>
+      <dt className="text-neutral-500">Period / date</dt>
+      <dd className="font-medium text-neutral-900">{formatIncomeRowPeriod(row)}</dd>
+      {anchor ? (
+        <>
+          <dt className="text-neutral-500">{row.frequency === "one_off" ? "Specific date" : "Anchor date"}</dt>
+          <dd className="text-neutral-800">{anchor}</dd>
+        </>
+      ) : null}
       <dt className="text-neutral-500">Frequency</dt>
       <dd className="text-neutral-800">{incomeFrequencyLabel(row.frequency)}</dd>
       <dt className="text-neutral-500">Income</dt>
@@ -7076,6 +7321,26 @@ function PropertyConstructionTabPanel({
     })
   }, [constructionProjects])
 
+  const addProgrammeModal = addProgrammeOpen ? (
+    <EditModal title="Add build schedule" onClose={() => setAddProgrammeOpen(false)}>
+      <ConstructionProjectFieldsForm
+        key="add-programme"
+        project={addProgrammeDraft}
+        submitLabel="Add schedule"
+        showDeleteButton={false}
+        requireStartAndCompletion
+        onSave={(patch) => {
+          onAddConstructionProject({
+            totalWeeks: patch.totalWeeks,
+            startDate: patch.startDate,
+            expectedCompletionDate: patch.expectedCompletionDate,
+          })
+          setAddProgrammeOpen(false)
+        }}
+      />
+    </EditModal>
+  ) : null
+
   if (!constructionProjects.length) {
     return (
       <div className="rounded-xl border border-neutral-200 bg-white p-6 text-center shadow-sm">
@@ -7087,6 +7352,7 @@ function PropertyConstructionTabPanel({
         >
           Add construction schedule
         </button>
+        {addProgrammeModal}
       </div>
     )
   }
@@ -7310,25 +7576,7 @@ function PropertyConstructionTabPanel({
           </div>
         )
       })()}
-      {addProgrammeOpen ? (
-        <EditModal title="Add build schedule" onClose={() => setAddProgrammeOpen(false)}>
-          <ConstructionProjectFieldsForm
-            key="add-programme"
-            project={addProgrammeDraft}
-            submitLabel="Add schedule"
-            showDeleteButton={false}
-            requireStartAndCompletion
-            onSave={(patch) => {
-              onAddConstructionProject({
-                totalWeeks: patch.totalWeeks,
-                startDate: patch.startDate,
-                expectedCompletionDate: patch.expectedCompletionDate,
-              })
-              setAddProgrammeOpen(false)
-            }}
-          />
-        </EditModal>
-      ) : null}
+      {addProgrammeModal}
       {logWeekModalProjectId
         ? (() => {
             const project = constructionProjects.find((x) => x.id === logWeekModalProjectId)
@@ -8289,7 +8537,7 @@ function PropertyTabEditor({
             <table className="w-full min-w-[20rem] border-collapse text-sm">
               <thead>
                 <tr className="border-b border-neutral-200 bg-neutral-50/90 text-left text-xs font-semibold uppercase tracking-wide text-neutral-600">
-                  <th className="px-4 py-3">Period</th>
+                  <th className="px-4 py-3">Period / date</th>
                   <th className="px-4 py-3">Frequency</th>
                   <th className="px-4 py-3 text-right">Income (£)</th>
                   <th className="px-4 py-3 text-right">Costs (£)</th>
@@ -8299,7 +8547,7 @@ function PropertyTabEditor({
               <tbody className="divide-y divide-neutral-100">
                 {sortedRows.map((row) => (
                   <tr key={row.id} className="bg-white">
-                    <td className="px-4 py-3 font-medium text-neutral-900">{row.period}</td>
+                    <td className="px-4 py-3 font-medium text-neutral-900">{formatIncomeRowPeriod(row)}</td>
                     <td className="px-4 py-3 text-neutral-700">{incomeFrequencyLabel(row.frequency)}</td>
                     <td className="px-4 py-3 text-right tabular-nums text-neutral-800">{formatGbpAmount(row.incomeAmount)}</td>
                     <td className="px-4 py-3 text-right tabular-nums text-neutral-800">{formatGbpAmount(row.costAmount)}</td>
@@ -8366,10 +8614,21 @@ function PropertyTabEditor({
           : null}
         {incomeAddOpen ? (
           <EditModal title="Add income row" onClose={() => setIncomeAddOpen(false)}>
-            <IncomeNewRowForm
-              propertyId={propertyId}
-              onAdd={onAddIncomeRow}
-              onDone={() => setIncomeAddOpen(false)}
+            <IncomeRowForm
+              key="add-income-row"
+              row={{
+                id: "__draft__",
+                propertyId,
+                period: "",
+                incomeAmount: 0,
+                costAmount: 0,
+                frequency: "monthly",
+              }}
+              submitLabel="Add income row"
+              onSubmit={(patch) => {
+                onAddIncomeRow({ propertyId, ...patch })
+                setIncomeAddOpen(false)
+              }}
             />
           </EditModal>
         ) : null}
@@ -8399,7 +8658,7 @@ function PropertyTabEditor({
               return (
                 <EditModal title="Delete income row?" onClose={() => setIncomeDeleteId(null)}>
                   <p className="text-sm leading-relaxed text-neutral-700">
-                    Remove the row for period <strong>{row.period}</strong> (income {formatGbpAmount(row.incomeAmount)}, costs{" "}
+                    Remove the row for <strong>{formatIncomeRowPeriod(row)}</strong> (income {formatGbpAmount(row.incomeAmount)}, costs{" "}
                     {formatGbpAmount(row.costAmount)})? This cannot be undone.
                   </p>
                   <div className="mt-6 flex flex-wrap justify-end gap-2 border-t border-neutral-100 pt-4">
@@ -8798,121 +9057,6 @@ function ConstructionProjectFieldsForm({
   )
 }
 
-function IncomeNewRowForm({
-  propertyId,
-  onAdd,
-  onDone,
-}: {
-  propertyId: string
-  onAdd: (payload: Omit<IncomeRow, "id">) => void
-  onDone?: () => void
-}) {
-  const [period, setPeriod] = useState("")
-  const [frequency, setFrequency] = useState<IncomeFrequency>("monthly")
-  const [incomeAmount, setIncomeAmount] = useState("")
-  const [costAmount, setCostAmount] = useState("")
-  const [formError, setFormError] = useState<string | null>(null)
-  const submit = (event: FormEvent) => {
-    event.preventDefault()
-    setFormError(null)
-    const inc = Number(incomeAmount)
-    const cost = Number(costAmount)
-    if (!period.trim()) {
-      setFormError("Choose the month for this income row.")
-      return
-    }
-    if (!Number.isFinite(inc)) {
-      setFormError("Enter a valid income amount.")
-      return
-    }
-    if (!Number.isFinite(cost)) {
-      setFormError("Enter a valid costs amount.")
-      return
-    }
-    if (inc === 0 || cost === 0) {
-      setFormError("Income and costs must each be a non-zero amount (not £0).")
-      return
-    }
-    onAdd({ propertyId, period: period.trim(), frequency, incomeAmount: inc, costAmount: cost })
-    setPeriod("")
-    setFrequency("monthly")
-    setIncomeAmount("")
-    setCostAmount("")
-    onDone?.()
-  }
-  return (
-    <form noValidate onSubmit={submit} className="space-y-4">
-      {formError ? (
-        <p role="alert" className={adminFormAlert}>
-          {formError}
-        </p>
-      ) : null}
-      <div className="grid gap-3 sm:grid-cols-2">
-        <label className="text-sm">
-          <span className={adminLabel}>Period</span>
-          <input
-            value={period}
-            onChange={(e) => {
-              setPeriod(e.target.value)
-              setFormError(null)
-            }}
-            className={adminFieldInput}
-            type="month"
-          />
-        </label>
-        <label className="text-sm">
-          <span className={adminLabel}>Frequency</span>
-          <select
-            value={frequency}
-            onChange={(e) => {
-              setFrequency(e.target.value as IncomeFrequency)
-              setFormError(null)
-            }}
-            className={adminFieldInput}
-          >
-            {INCOME_FREQUENCY_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="text-sm">
-          <span className={adminLabel}>Income (£)</span>
-          <input
-            value={incomeAmount}
-            onChange={(e) => {
-              setIncomeAmount(e.target.value)
-              setFormError(null)
-            }}
-            className={adminFieldInput}
-            type="number"
-            step="0.01"
-          />
-        </label>
-        <label className="text-sm">
-          <span className={adminLabel}>Costs (£)</span>
-          <input
-            value={costAmount}
-            onChange={(e) => {
-              setCostAmount(e.target.value)
-              setFormError(null)
-            }}
-            className={adminFieldInput}
-            type="number"
-            step="0.01"
-          />
-        </label>
-      </div>
-      <div className="flex flex-wrap gap-2 border-t border-neutral-100 pt-4">
-        <button type="submit" className={adminBtnPrimary}>
-          Add income row
-        </button>
-      </div>
-    </form>
-  )
-}
-
 /* ----------------------------------------------------------------------------
  * Rent schedule + automatic rent-received tracking (client feedback #5 / #7)
  * ------------------------------------------------------------------------- */
@@ -8927,61 +9071,44 @@ function rentFrequencyLabel(v: Property["rentFrequency"]): string {
   return RENT_FREQUENCY_OPTIONS.find((o) => o.value === v)?.label ?? "—"
 }
 
-/** Parse a YYYY-MM-DD (or ISO) string as a local date, avoiding UTC off-by-one. */
-function parseISODateLocal(value: string | undefined): Date | null {
-  if (!value) return null
-  const m = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})/)
-  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
-  const t = Date.parse(value)
-  return Number.isFinite(t) ? new Date(t) : null
-}
-
-function toISODateString(d: Date): string {
-  return [d.getFullYear(), String(d.getMonth() + 1).padStart(2, "0"), String(d.getDate()).padStart(2, "0")].join("-")
-}
-
-function todayISODate(): string {
-  return toISODateString(new Date())
-}
-
-/** Nth monthly occurrence from a start date, clamped to a valid day for short months. */
-function monthlyRentOccurrence(start: Date, n: number, dueDay?: number): Date {
-  const base = new Date(start.getFullYear(), start.getMonth() + n, 1)
-  const lastDay = new Date(base.getFullYear(), base.getMonth() + 1, 0).getDate()
-  const day = Math.min(dueDay && dueDay >= 1 ? dueDay : start.getDate(), lastDay)
-  return new Date(base.getFullYear(), base.getMonth(), day)
-}
-
-/** Every rent due date from the schedule start up to (and including) today. */
-function rentDueDatesUpTo(property: Property, todayISO: string): string[] {
-  const freq = property.rentFrequency
-  const start = parseISODateLocal(property.rentStartDate)
-  if (!freq || !start) return []
-  const today = parseISODateLocal(todayISO) ?? new Date()
-  const out: string[] = []
-  for (let i = 0; i < 240; i++) {
-    let d: Date
-    if (freq === "monthly") {
-      d = monthlyRentOccurrence(start, i, property.rentDueDay)
-    } else {
-      const stepDays = freq === "weekly" ? 7 : 14
-      d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i * stepDays)
-    }
-    if (d.getTime() > today.getTime()) break
-    out.push(toISODateString(d))
-  }
-  return out
-}
-
-function isRentLate(receipt: RentReceipt): boolean {
-  if (!receipt.receivedDate) return false
-  const due = parseISODateLocal(receipt.dueDate)
-  const rec = parseISODateLocal(receipt.receivedDate)
-  return !!due && !!rec && rec.getTime() > due.getTime()
-}
-
-function hasRentSchedule(property: Property): boolean {
-  return !!property.rentFrequency && !!property.rentStartDate && (property.rentAmount ?? 0) > 0
+function RentScopeSummary({
+  metrics,
+  onOpenProperty,
+}: {
+  metrics: PortfolioRentMetrics
+  onOpenProperty: (propertyId: string) => void
+}) {
+  return (
+    <div className="rounded-lg border border-yhgc-gold/30 bg-yhgc-gold/5 p-4">
+      <h3 className="text-sm font-semibold text-neutral-900">Rent tracking</h3>
+      <div className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
+        <div className="rounded-md border border-neutral-200 bg-white px-3 py-2">
+          Rent due to confirm: <strong>{metrics.pendingDueCount}</strong>
+        </div>
+        <div className="rounded-md border border-neutral-200 bg-white px-3 py-2">
+          Rent received: <strong>{formatGbpAmount(metrics.totalRentReceived)}</strong>
+        </div>
+      </div>
+      {metrics.propertiesWithPending.length > 0 ? (
+        <ul className="mt-3 divide-y divide-neutral-100 rounded-lg border border-neutral-200 bg-white">
+          {metrics.propertiesWithPending.map((p) => (
+            <li key={p.propertyId} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
+              <span className="text-neutral-800">
+                {p.title} · {p.pendingCount} due
+              </span>
+              <button
+                type="button"
+                onClick={() => onOpenProperty(p.propertyId)}
+                className="rounded-lg bg-yhgc-crimson px-3 py-1.5 text-xs font-medium text-white hover:opacity-90"
+              >
+                Confirm rent
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  )
 }
 
 function RentScheduleForm({
@@ -9088,14 +9215,18 @@ function RentScheduleForm({
 function MarkRentReceivedForm({
   defaultAmount,
   dueDate,
+  initialReceivedDate,
+  submitLabel = "Confirm rent received",
   onSubmit,
 }: {
   defaultAmount: number
   dueDate: string
+  initialReceivedDate?: string
+  submitLabel?: string
   onSubmit: (amount: number, receivedDate: string) => void
 }) {
   const [amount, setAmount] = useState(defaultAmount ? String(defaultAmount) : "")
-  const [receivedDate, setReceivedDate] = useState(todayISODate())
+  const [receivedDate, setReceivedDate] = useState(initialReceivedDate?.trim() || todayISODate())
   const [formError, setFormError] = useState<string | null>(null)
 
   const due = parseISODateLocal(dueDate)
@@ -9152,7 +9283,7 @@ function MarkRentReceivedForm({
         </p>
       ) : null}
       <div className="flex flex-wrap gap-2 border-t border-neutral-100 pt-4">
-        <button type="submit" className={adminBtnPrimary}>Confirm rent received</button>
+        <button type="submit" className={adminBtnPrimary}>{submitLabel}</button>
       </div>
     </form>
   )
@@ -9161,12 +9292,14 @@ function MarkRentReceivedForm({
 function PropertyRentSchedulePanel({ property }: { property: Property }) {
   const rentReceipts = useAppStore((s) => s.snapshot?.rentReceipts ?? [])
   const markRentReceived = useAppStore((s) => s.markRentReceived)
+  const updateRentReceipt = useAppStore((s) => s.updateRentReceipt)
   const deleteRentReceipt = useAppStore((s) => s.deleteRentReceipt)
   const updateProperty = useAppStore((s) => s.updateProperty)
   const persist = useAppStore((s) => s.persist)
 
   const [editScheduleOpen, setEditScheduleOpen] = useState(false)
   const [receiveDueDate, setReceiveDueDate] = useState<string | null>(null)
+  const [editingReceipt, setEditingReceipt] = useState<RentReceipt | null>(null)
 
   const receiptsForProp = useMemo(
     () => rentReceipts.filter((r) => r.propertyId === property.id),
@@ -9277,17 +9410,26 @@ function PropertyRentSchedulePanel({ property }: { property: Property }) {
                     <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-800">Late</span>
                   ) : null}
                 </span>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (!(await themedConfirm(`Remove the rent payment recorded for ${r.dueDate}?`))) return
-                    deleteRentReceipt(r.id)
-                    void persist()
-                  }}
-                  className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-medium text-red-800 hover:bg-red-100"
-                >
-                  Remove
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditingReceipt(r)}
+                    className="rounded-lg border border-neutral-200 bg-white px-2.5 py-1 text-xs font-medium text-neutral-800 hover:bg-neutral-50"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!(await themedConfirm(`Remove the rent payment recorded for ${r.dueDate}?`))) return
+                      deleteRentReceipt(r.id)
+                      void persist()
+                    }}
+                    className="rounded-lg border border-red-200 bg-red-50 px-2.5 py-1 text-xs font-medium text-red-800 hover:bg-red-100"
+                  >
+                    Remove
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
@@ -9316,6 +9458,22 @@ function PropertyRentSchedulePanel({ property }: { property: Property }) {
               markRentReceived({ propertyId: property.id, dueDate: receiveDueDate, amount, receivedDate })
               void persist()
               setReceiveDueDate(null)
+            }}
+          />
+        </EditModal>
+      ) : null}
+
+      {editingReceipt ? (
+        <EditModal title="Edit rent payment" onClose={() => setEditingReceipt(null)}>
+          <MarkRentReceivedForm
+            defaultAmount={editingReceipt.amount}
+            dueDate={editingReceipt.dueDate}
+            initialReceivedDate={editingReceipt.receivedDate}
+            submitLabel="Save changes"
+            onSubmit={(amount, receivedDate) => {
+              updateRentReceipt(editingReceipt.id, { amount, receivedDate })
+              void persist()
+              setEditingReceipt(null)
             }}
           />
         </EditModal>

@@ -1253,8 +1253,11 @@ class _PropertyPageState extends State<PropertyPage> {
     final financePcmSum = finances.fold<double>(0, (s, f) => s + (f.monthlyPayment ?? 0));
     final annualFinance = financePcmSum * 12;
     final costsToDateCombined = invoiceCostSum + annualFinance;
-    final projectedIncome = property.net * 12;
-    final netPosition = projectedIncome - costsToDateCombined;
+    final annualProjectedIncome = property.net * 12;
+    final incomeFigure = rentReceivedToDate > 0 ? rentReceivedToDate : annualProjectedIncome;
+    final incomeFigureLabel = rentReceivedToDate > 0 ? 'income to date' : 'projected income';
+    final projectedIncome = incomeFigure;
+    final netPosition = incomeFigure - costsToDateCombined;
     final financeDocs = docs.where((d) => d.type.toLowerCase() == 'finance').toList();
     final insuranceDocs = docs.where((d) => d.type.toLowerCase() == 'insurance').toList();
     final lastUpdate = docs.isNotEmpty ? docs.first.uploadedAt : (inv.isNotEmpty ? inv.first.date : '-');
@@ -1344,7 +1347,7 @@ class _PropertyPageState extends State<PropertyPage> {
                 spacing: 10,
                 runSpacing: 10,
                 children: [
-                  _MiniStatPill(value: _money(projectedIncome), label: 'projected income', color: AppColors.gold),
+                  _MiniStatPill(value: _money(projectedIncome), label: incomeFigureLabel, color: AppColors.gold),
                   _MiniStatPill(value: _money(costsToDateCombined), label: 'costs (incl. finance)', color: Colors.orange),
                   _MiniStatPill(value: _money(netPosition), label: 'net position', color: Colors.greenAccent),
                 ],
@@ -1503,7 +1506,10 @@ class _PropertyPageState extends State<PropertyPage> {
               _KV(label: 'Monthly expenses (repeating)', value: '-${_money(monthlyRepeatingExpenses)}'),
               _KV(label: 'Net after monthly expenses', value: _money(property.net - monthlyRepeatingExpenses)),
             ],
-            _KV(label: 'Annual income', value: _money(projectedIncome)),
+            _KV(
+              label: rentReceivedToDate > 0 ? 'Income to date' : 'Annual income (projected)',
+              value: _money(projectedIncome),
+            ),
             _KV(label: 'Supplier costs (invoices)', value: _money(invoiceCostSum)),
             _KV(label: 'Loan / finance (pcm)', value: _money(financePcmSum)),
             _KV(label: 'Costs to date (incl. 12 mo finance)', value: _money(costsToDateCombined)),
@@ -1593,7 +1599,11 @@ class _PropertyPageState extends State<PropertyPage> {
               ...incomes.map(
                     (r) => Card(
                       child: ListTile(
-                        title: Text('Period ${r.period}'),
+                        title: Text(
+                          r.anchorDate?.trim().isNotEmpty == true
+                              ? (r.frequency == 'one_off' ? 'Date ${r.anchorDate}' : 'From ${r.anchorDate}')
+                              : 'Period ${r.period}',
+                        ),
                         subtitle: Text(
                           'Income ${_money(r.incomeAmount)} · Costs ${_money(r.costAmount)}'
                           '${r.frequency != null && r.frequency!.isNotEmpty ? ' · ${incomeFrequencyLabelMobile(r.frequency)}' : ''}',

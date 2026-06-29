@@ -176,6 +176,7 @@ class IncomeRow {
   final double incomeAmount;
   final double costAmount;
   final String? frequency; // 'monthly' | 'weekly' | 'fortnightly' | 'one_off'
+  final String? anchorDate;
 
   const IncomeRow({
     required this.id,
@@ -184,6 +185,7 @@ class IncomeRow {
     required this.incomeAmount,
     required this.costAmount,
     this.frequency,
+    this.anchorDate,
   });
 }
 
