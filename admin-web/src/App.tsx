@@ -647,6 +647,8 @@ function PropertyEditForm({
     property.currentValue === undefined ? "" : String(property.currentValue),
   )
   const [monthlyNet, setMonthlyNet] = useState(property.monthlyNet === undefined ? "" : String(property.monthlyNet))
+  const [rentDueDay, setRentDueDay] = useState(property.rentDueDay != null ? String(property.rentDueDay) : "1")
+  const [rentStartDate, setRentStartDate] = useState(toHtmlDateInputValue(property.rentStartDate))
   const [purchasePrice, setPurchasePrice] = useState(
     property.purchasePrice === undefined ? "" : String(property.purchasePrice),
   )
@@ -672,6 +674,8 @@ function PropertyEditForm({
     setHeroImageUrl(property.heroImageUrl ?? "")
     setCurrentValue(property.currentValue === undefined ? "" : String(property.currentValue))
     setMonthlyNet(property.monthlyNet === undefined ? "" : String(property.monthlyNet))
+    setRentDueDay(property.rentDueDay != null ? String(property.rentDueDay) : "1")
+    setRentStartDate(toHtmlDateInputValue(property.rentStartDate))
     setPurchasePrice(property.purchasePrice === undefined ? "" : String(property.purchasePrice))
     setPurchaseDate(toHtmlDateInputValue(property.purchaseDate))
     setRefinanceDate(toHtmlDateInputValue(property.refinanceDate))
@@ -740,6 +744,21 @@ function PropertyEditForm({
       setFormError(rnp.error)
       return
     }
+
+    const dueDayNum = Number(rentDueDay)
+    const start = rentStartDate.trim()
+    if (rmn.value != null && rmn.value > 0) {
+      if (!start) {
+        setFormError("Choose the first rent due date when monthly net is set.")
+        return
+      }
+      if (!Number.isFinite(dueDayNum) || dueDayNum < 1 || dueDayNum > 31) {
+        setFormError("Rent due day must be between 1 and 31.")
+        return
+      }
+    }
+    const rentPatch = rentSchedulePatchFromMonthlyNet(rmn.value, dueDayNum, start)
+
     setFormError(null)
     onSave({
       clientId,
@@ -760,6 +779,7 @@ function PropertyEditForm({
       incomeToDate: rit.value,
       costToDate: rct.value,
       netPosition: rnp.value,
+      ...(rentPatch ?? {}),
     })
   }
 
@@ -896,7 +916,41 @@ function PropertyEditForm({
             type="text"
             inputMode="decimal"
             autoComplete="off"
+            placeholder="e.g. 1350"
           />
+        </label>
+        <label className="text-sm">
+          <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-neutral-500">Rent due day of month</span>
+          <input
+            value={rentDueDay}
+            onChange={(e) => {
+              setRentDueDay(e.target.value)
+              setFormError(null)
+            }}
+            className="w-full rounded-xl border border-neutral-300 bg-white px-3 py-2.5 outline-none transition focus:border-yhgc-gold focus:ring-2 focus:ring-yhgc-gold/20"
+            type="number"
+            min={1}
+            max={31}
+            placeholder="e.g. 1"
+          />
+        </label>
+        <label className="text-sm md:col-span-2">
+          <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-neutral-500">First rent due date (date receivable)</span>
+          <input
+            value={rentStartDate}
+            onChange={(e) => {
+              const v = e.target.value
+              setRentStartDate(v)
+              const d = v.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/)
+              if (d) setRentDueDay(String(Number(d[3])))
+              setFormError(null)
+            }}
+            className="w-full rounded-xl border border-neutral-300 bg-white px-3 py-2.5 outline-none transition focus:border-yhgc-gold focus:ring-2 focus:ring-yhgc-gold/20"
+            type="date"
+          />
+          <span className="mt-1 block text-xs text-neutral-500">
+            e.g. 1 May 2026 — saved with monthly net to enable <strong>Rent received</strong> prompts on the Income tab.
+          </span>
         </label>
         <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500 md:col-span-2">Portfolio &amp; operating summary</p>
         <label className="text-sm">
