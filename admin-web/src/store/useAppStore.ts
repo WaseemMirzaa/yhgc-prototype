@@ -123,7 +123,8 @@ interface AppState {
     payload: Pick<Company, "clientId" | "companyNumber" | "name"> & Partial<Pick<Company, "registeredAddress">>,
   ) => void
   addProperty: (
-    payload: Pick<Property, "clientId" | "companyId" | "title" | "address" | "propertyType" | "status">,
+    payload: Pick<Property, "clientId" | "companyId" | "title" | "address" | "propertyType" | "status"> &
+      Partial<Pick<Property, "monthlyNet" | "rentAmount" | "rentFrequency" | "rentDueDay" | "rentStartDate">>,
   ) => void
   updateClient: (id: string, patch: Partial<Omit<Client, "id" | "createdAt">>) => void
   updateCompany: (id: string, patch: Partial<Omit<Company, "id">>) => void
@@ -328,7 +329,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       actionNotice: { kind: "success", message: "Company added." },
     })
   },
-  addProperty: ({ clientId, companyId, title, address, propertyType, status }) => {
+  addProperty: ({ clientId, companyId, title, address, propertyType, status, monthlyNet, rentAmount, rentFrequency, rentDueDay, rentStartDate }) => {
     const current = get().snapshot
     if (!current) return
     if (isBlank(clientId) || isBlank(companyId) || isBlank(title) || isBlank(address)) {
@@ -343,6 +344,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       address,
       propertyType,
       status,
+      ...(monthlyNet != null ? { monthlyNet } : {}),
+      ...(rentAmount != null ? { rentAmount } : {}),
+      ...(rentFrequency != null ? { rentFrequency } : {}),
+      ...(rentDueDay != null ? { rentDueDay } : {}),
+      ...(rentStartDate != null ? { rentStartDate } : {}),
     }
     set({
       snapshot: { ...current, properties: [next, ...current.properties], updatedAt: now() },
