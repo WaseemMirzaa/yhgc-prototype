@@ -7,12 +7,11 @@ const DEPLOY_REFRESH_SCRIPT = `
   if (!meta) return;
   var buildId = meta.getAttribute("content");
   if (!buildId) return;
-  var storageKey = "yhgc-admin-deploy-id";
-  var reloadKey = "yhgc-admin-deploy-reload";
+  var storageKey = "yhgc-admin-deploy-id-v2";
+  var reloadKey = "yhgc-admin-deploy-reload-v2";
   var seen = localStorage.getItem(storageKey);
   if (seen === buildId) return;
   localStorage.setItem(storageKey, buildId);
-  if (!seen) return;
   if (sessionStorage.getItem(reloadKey) === buildId) return;
   sessionStorage.setItem(reloadKey, buildId);
   var url = new URL(window.location.href);
